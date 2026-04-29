@@ -1166,8 +1166,10 @@ export function App() {
   return (
     <div id="app-root" className={lowPerfMode ? "low-perf" : ""}>
       {phase === "warning" && (
-        <div id="warning-screen">
-          <div id="warning-content">
+        <div id="warning-screen" onClick={() => setPhase("title")}>
+          <div id="warning-content" onClick={(event) => event.stopPropagation()}>
+            <div className="warning-badge">启动前提示</div>
+            <div className="warning-title">请先确认内容提醒</div>
             <div id="warning-text">
               <p>本游戏包含悬疑、暴力暗示与心理惊悚内容，建议成年或有监护同意的玩家体验。</p>
               <p>故事涉及校园命案、创伤记忆与灵异叙事，请根据自己的接受程度决定是否继续。</p>
