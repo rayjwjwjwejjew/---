@@ -1638,21 +1638,37 @@ textarea {
   border-bottom: 1px solid rgba(255, 237, 214, 0.1);
 }
 
-.cg-art {
+.cg-art,
+.cg-media {
   min-height: 480px;
   background: center / cover no-repeat;
   position: relative;
   transform-origin: center;
   animation: cgArtPush 0.9s cubic-bezier(0.18, 0.9, 0.22, 1);
+  overflow: hidden;
 }
 
-.cg-art::after {
+.cg-media {
+  min-height: 480px;
+}
+
+.cg-art::after,
+.cg-media::after {
   content: "";
   position: absolute;
   inset: 0;
   background:
     linear-gradient(180deg, rgba(0, 0, 0, 0.08) 0%, transparent 25%, rgba(0, 0, 0, 0.38) 100%),
     radial-gradient(circle at top right, rgba(255, 221, 179, 0.18), transparent 25%);
+}
+
+.cg-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  background: #000;
 }
 
 .cg-meta {

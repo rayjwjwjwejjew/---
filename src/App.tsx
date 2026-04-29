@@ -56,6 +56,7 @@ type Manifest = {
   backgrounds?: AssetEntry[];
   bg?: AssetEntry[];
   sprite?: AssetEntry[];
+  video?: AssetEntry[];
   bgm?: AssetEntry[];
   sfx?: AssetEntry[];
 };
@@ -139,11 +140,20 @@ function safeParse<T>(raw: string | null, fallback: T): T {
 function normalizeManifest(manifest: Manifest): Manifest {
   const backgrounds = [...(manifest.backgrounds || []), ...(manifest.bg || [])];
   const dedupedBackgrounds = Array.from(new Map(backgrounds.map((item) => [item.id, item])).values());
+  const { bg: _legacyBg, ...rest } = manifest;
   return {
-    ...manifest,
+    ...rest,
     backgrounds: dedupedBackgrounds,
-    bg: undefined,
   };
+}
+
+function findBestAssetMatch(items: AssetEntry[] | undefined, queries: string[]) {
+  if (!items || items.length === 0) return undefined;
+  const loweredQueries = queries.map((query) => query.toLowerCase()).filter(Boolean);
+  return (
+    items.find((item) => loweredQueries.some((query) => item.label.toLowerCase().includes(query) || item.id.toLowerCase().includes(query))) ||
+    items[0]
+  );
 }
 
 function readSaveSlots(): Array<SaveSlot | null> {
@@ -545,7 +555,9 @@ export function App() {
   const [cgVisible, setCgVisible] = useState(false);
   const [cgClosing, setCgClosing] = useState(false);
   const [cgTitle, setCgTitle] = useState("");
+  const [cgMediaKind, setCgMediaKind] = useState<"image" | "video">("image");
   const [cgImageUrl, setCgImageUrl] = useState("");
+  const [cgVideoUrl, setCgVideoUrl] = useState("");
   const [lowPerfMode, setLowPerfMode] = useState(false);
   const [hudAwake, setHudAwake] = useState(false);
   const [startTransitioning, setStartTransitioning] = useState(false);
@@ -572,6 +584,8 @@ export function App() {
   const sfxRef = useRef<HTMLAudioElement>(new Audio());
   const bgmUrlRef = useRef("");
   const sfxUrlRef = useRef("");
+  const cgVideoUrlRef = useRef("");
+  const cgVideoRef = useRef<HTMLVideoElement>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const cgCloseTimerRef = useRef<number | null>(null);
   const preludeTimerRef = useRef<number | null>(null);
@@ -825,23 +839,69 @@ export function App() {
     }
     if (phase !== "playing" || !curLine?.cg || cgVisible) return;
     setCgTitle(curLine.cg);
-    const cgUrl = getSceneBg(curLine.scene) || bgUrl || DEFAULT_BG;
     const cgKey = `${index}:${curLine.cg}`;
     if (cgSeenRef.current === cgKey) return;
     let cancelled = false;
+    const posterUrl = getSceneBg(curLine.scene) || bgUrl || DEFAULT_BG;
     pulseUi("cg");
-    void ensureImageReady(cgUrl).then(() => {
-      if (cancelled) return;
-      setCgImageUrl(cgUrl);
-      setCgClosing(false);
-      setCgVisible(true);
-      cgSeenRef.current = cgKey;
-      setOpeningPreludeVisible(false);
-    });
+    const openCgWithPoster = () => {
+      void ensureImageReady(posterUrl).then(() => {
+        if (cancelled) return;
+        if (cgVideoUrlRef.current) {
+          URL.revokeObjectURL(cgVideoUrlRef.current);
+          cgVideoUrlRef.current = "";
+        }
+        setCgMediaKind("image");
+        setCgVideoUrl("");
+        setCgImageUrl(posterUrl);
+        setCgClosing(false);
+        setCgVisible(true);
+        cgSeenRef.current = cgKey;
+        setOpeningPreludeVisible(false);
+      });
+    };
+
+    const videoMatch = findBestAssetMatch(manifestState.video, [curLine.cg, curLine.scene, "cg", "视频"]);
+    if (videoMatch) {
+      void AssetDB.get<Blob>(AssetDB.STORE_ASSETS, videoMatch.id)
+        .then((blob) => {
+          if (!blob || cancelled) return null;
+          const url = URL.createObjectURL(blob);
+          if (cgVideoUrlRef.current) {
+            URL.revokeObjectURL(cgVideoUrlRef.current);
+          }
+          cgVideoUrlRef.current = url;
+          return url;
+        })
+        .then((url) => {
+          if (!url || cancelled) {
+            openCgWithPoster();
+            return;
+          }
+          void ensureImageReady(posterUrl).then(() => {
+            if (cancelled) return;
+            setCgMediaKind("video");
+            setCgVideoUrl(url);
+            setCgImageUrl(posterUrl);
+            setCgClosing(false);
+            setCgVisible(true);
+            cgSeenRef.current = cgKey;
+            setOpeningPreludeVisible(false);
+          });
+        })
+        .catch(() => {
+          openCgWithPoster();
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    openCgWithPoster();
     return () => {
       cancelled = true;
     };
-  }, [bgUrl, cgVisible, curLine, index, phase, pulseUi]);
+  }, [bgUrl, cgVisible, curLine, index, manifestState.video, phase, pulseUi]);
 
   useEffect(() => {
     if (phase !== "playing" || !curLine) return;
@@ -861,6 +921,14 @@ export function App() {
       });
     });
   }, [curLine, index, phase]);
+
+  useEffect(() => {
+    if (!cgVisible || cgMediaKind !== "video") return;
+    const video = cgVideoRef.current;
+    if (!video) return;
+    video.currentTime = 0;
+    void video.play().catch(() => undefined);
+  }, [cgMediaKind, cgVisible, cgVideoUrl]);
 
   const crossfadeBgm = useCallback(
     async (assetId: string, name: string) => {
@@ -1099,6 +1167,8 @@ export function App() {
       setSkip(false);
       setOpeningPreludeVisible(false);
       setCgClosing(false);
+      setCgMediaKind("image");
+      setCgVideoUrl("");
       cgSeenRef.current = "";
       stopBgm();
       const match = bgmList.find((item) => item.label === slot.bgmName || item.label.includes(slot.bgmName || ""));
@@ -1126,6 +1196,8 @@ export function App() {
     setSkip(false);
     setOpeningPreludeVisible(false);
     setCgClosing(false);
+    setCgMediaKind("image");
+    setCgVideoUrl("");
     cgSeenRef.current = "";
     stopBgm();
     const match = bgmList.find((item) => item.label === lastSave.bgmName || item.label.includes(lastSave.bgmName || ""));
@@ -1156,8 +1228,14 @@ export function App() {
     pulseUi("cg");
     if (cgCloseTimerRef.current) window.clearTimeout(cgCloseTimerRef.current);
     cgCloseTimerRef.current = window.setTimeout(() => {
+      if (cgVideoUrlRef.current) {
+        URL.revokeObjectURL(cgVideoUrlRef.current);
+        cgVideoUrlRef.current = "";
+      }
       setCgVisible(false);
       setCgClosing(false);
+      setCgMediaKind("image");
+      setCgVideoUrl("");
       cgCloseTimerRef.current = null;
     }, 240);
   }, [cgVisible, cgTitle, curLine?.cg, index, pulseUi]);
@@ -1256,6 +1334,8 @@ export function App() {
     setActivePanel(null);
     setCgVisible(false);
     setCgClosing(false);
+    setCgMediaKind("image");
+    setCgVideoUrl("");
     cgSeenRef.current = "";
     setOpeningPreludeVisible(true);
     stopBgm();
@@ -1292,10 +1372,10 @@ export function App() {
     setActivePanel((prev) => (prev === name ? null : name));
   };
 
-  const uploadAsset = async (kind: "bg" | "sprite" | "bgm" | "sfx") => {
+  const uploadAsset = async (kind: "bg" | "sprite" | "video" | "bgm" | "sfx") => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = kind === "bgm" || kind === "sfx" ? "audio/*" : "image/*";
+    input.accept = kind === "bgm" || kind === "sfx" ? "audio/*" : kind === "video" ? "video/*" : "image/*";
     input.onchange = async () => {
       const file = input.files?.[0];
       if (!file) return;
@@ -1458,6 +1538,7 @@ export function App() {
       if (codeTxtUrlRef.current) URL.revokeObjectURL(codeTxtUrlRef.current);
       if (bgmUrlRef.current) URL.revokeObjectURL(bgmUrlRef.current);
       if (sfxUrlRef.current) URL.revokeObjectURL(sfxUrlRef.current);
+      if (cgVideoUrlRef.current) URL.revokeObjectURL(cgVideoUrlRef.current);
       if (cgCloseTimerRef.current) window.clearTimeout(cgCloseTimerRef.current);
       if (preludeTimerRef.current) window.clearTimeout(preludeTimerRef.current);
       if (uiPulseRef.current) window.clearTimeout(uiPulseRef.current);
@@ -1559,6 +1640,9 @@ export function App() {
           <button className="btn" onClick={() => uploadAsset("sprite")}>
             上传立绘
           </button>
+          <button className="btn" onClick={() => uploadAsset("video")}>
+            上传视频CG
+          </button>
           <button className="btn" onClick={() => uploadAsset("bgm")}>
             上传BGM
           </button>
@@ -1575,7 +1659,7 @@ export function App() {
           <input value={assetQuery} onChange={(e) => setAssetQuery(e.target.value)} placeholder="输入文件名或标签" />
         </div>
         <div className="row">
-          {(["all", "backgrounds", "sprite", "bgm", "sfx"] as const).map((kind) => (
+          {(["all", "backgrounds", "sprite", "video", "bgm", "sfx"] as const).map((kind) => (
             <button
               key={kind}
               className="btn"
@@ -1591,7 +1675,7 @@ export function App() {
               const next = prompt("批量重命名：输入前缀");
               if (!next) return;
               const updated: Manifest = { ...manifestState };
-              (["backgrounds", "sprite", "bgm", "sfx"] as const).forEach((kind) => {
+              (["backgrounds", "sprite", "video", "bgm", "sfx"] as const).forEach((kind) => {
                 updated[kind] = (updated[kind] || []).map((item, idx) => ({ ...item, label: `${next}-${idx + 1}` }));
               });
               localStorage.setItem(KEY_MANIFEST, JSON.stringify(updated));
@@ -2135,12 +2219,28 @@ export function App() {
             <div className={`cg-overlay ${cgClosing ? "closing" : "showing"}`} onClick={closeCg}>
               <div className="cg-panel" onClick={(event) => event.stopPropagation()}>
                 <div className="cg-header">
-                  <div className="cg-kicker">CG · 镜头展开</div>
+                  <div className="cg-kicker">{cgMediaKind === "video" ? "VIDEO CG · 镜头展开" : "CG · 镜头展开"}</div>
                   <div className="cg-title">{cgTitle}</div>
                 </div>
-                <div className="cg-art" style={{ backgroundImage: `url("${cgImageUrl}")` }} />
+                <div className="cg-media" style={{ backgroundImage: `url("${cgImageUrl}")` }}>
+                  {cgMediaKind === "video" ? (
+                    <video
+                      ref={cgVideoRef}
+                      className="cg-video"
+                      src={cgVideoUrl}
+                      autoPlay
+                      playsInline
+                      controls={false}
+                      muted={lowPerfMode}
+                      onEnded={() => closeCg()}
+                      onError={() => setCgMediaKind("image")}
+                    />
+                  ) : (
+                    <div className="cg-art" style={{ backgroundImage: `url("${cgImageUrl}")` }} />
+                  )}
+                </div>
                 <div className="cg-meta">
-                  <div className="cg-caption">按空格或点击收束镜头</div>
+                  <div className="cg-caption">{cgMediaKind === "video" ? "视频 CG 播放中，按空格或点击收束镜头" : "按空格或点击收束镜头"}</div>
                   <button className="btn cg-close" onClick={closeCg}>
                     继续
                   </button>
