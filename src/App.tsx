@@ -168,6 +168,8 @@ function collectScriptScenes() {
   );
 }
 
+const SCRIPT_SCENES = collectScriptScenes();
+
 function readSaveSlots(): Array<SaveSlot | null> {
   const slots = safeParse<Array<SaveSlot | null>>(localStorage.getItem(KEY_SAVE_SLOTS), []);
   return Array.from({ length: SAVE_SLOT_COUNT }, (_, idx) => slots[idx] || null);
@@ -721,6 +723,93 @@ export function App() {
     [playLayerTone],
   );
 
+  const ensureBackgroundAssetUrl = useCallback(async (assetId: string) => {
+    const cached = bgAssetUrlCacheRef.current[assetId];
+    if (cached) return cached;
+    const blob = await AssetDB.get<Blob>(AssetDB.STORE_ASSETS, assetId);
+    if (!blob) return "";
+    const url = URL.createObjectURL(blob);
+    bgAssetUrlCacheRef.current[assetId] = url;
+    return url;
+  }, []);
+
+  const getBackgroundAssetLabel = useCallback(
+    (assetId: string) => {
+      return (
+        manifestState.backgrounds?.find((item) => item.id === assetId)?.label ||
+        manifestState.bg?.find((item) => item.id === assetId)?.label ||
+        assetId
+      );
+    },
+    [manifestState.backgrounds, manifestState.bg],
+  );
+
+  const resolveSceneBackground = useCallback(
+    (scene: string | undefined) => {
+      if (!scene) return DEFAULT_BG;
+      const override = sceneBgOverrides[scene];
+      if (override?.source === "url" && override.value) return override.value;
+      if (override?.source === "asset" && bgAssetUrlCacheRef.current[override.value]) {
+        return bgAssetUrlCacheRef.current[override.value];
+      }
+      return getSceneBg(scene) || DEFAULT_BG;
+    },
+    [sceneBgOverrides],
+  );
+
+  const applySceneBackground = useCallback(
+    async (scene: string, assetId: string | null) => {
+      const nextOverrides = { ...sceneBgOverrides };
+      if (!assetId) {
+        delete nextOverrides[scene];
+        setSceneBgOverrides(nextOverrides);
+        writeSceneBgOverrides(nextOverrides);
+        return;
+      }
+      nextOverrides[scene] = { source: "asset", value: assetId, label: getBackgroundAssetLabel(assetId) };
+      setSceneBgOverrides(nextOverrides);
+      writeSceneBgOverrides(nextOverrides);
+      if (scene === curLine?.scene) {
+        const url = await ensureBackgroundAssetUrl(assetId);
+        if (url) {
+          setBgUrl(url);
+          lastBgRef.current = url;
+          pulseUi("scene");
+        }
+      }
+    },
+    [curLine?.scene, ensureBackgroundAssetUrl, getBackgroundAssetLabel, pulseUi, sceneBgOverrides],
+  );
+
+  const previewSceneBackground = useCallback(
+    async (scene: string, assetId?: string | null) => {
+      const override = sceneBgOverrides[scene];
+      if (assetId) {
+        const url = await ensureBackgroundAssetUrl(assetId);
+        if (url) {
+          setBgUrl(url);
+          lastBgRef.current = url;
+          pulseUi("scene");
+        }
+        return;
+      }
+      if (override?.source === "asset") {
+        const url = await ensureBackgroundAssetUrl(override.value);
+        if (url) {
+          setBgUrl(url);
+          lastBgRef.current = url;
+          pulseUi("scene");
+        }
+        return;
+      }
+      const builtIn = getSceneBg(scene) || DEFAULT_BG;
+      setBgUrl(builtIn);
+      lastBgRef.current = builtIn;
+      pulseUi("scene");
+    },
+    [ensureBackgroundAssetUrl, pulseUi, sceneBgOverrides],
+  );
+
   useEffect(() => {
     const root = document.documentElement.style;
     root.setProperty("--dim", `${settings.dim / 100}`);
@@ -760,7 +849,7 @@ export function App() {
 
   useEffect(() => {
     if (!selectedSceneName) {
-      const initialScene = curLine?.scene || collectScriptScenes()[0] || "";
+      const initialScene = curLine?.scene || SCRIPT_SCENES[0] || "";
       setSelectedSceneName(initialScene);
       const initialOverride = sceneBgOverrides[initialScene];
       setCustomSceneBgUrl(initialOverride?.source === "url" ? initialOverride.value : "");
@@ -901,7 +990,7 @@ export function App() {
       });
     };
 
-    const videoMatch = findBestAssetMatch(manifestState.video, [curLine.cg, curLine.scene, "cg", "视频"]);
+    const videoMatch = findBestAssetMatch(manifestState.video, [curLine.cg, curLine.scene || "", "cg", "视频"]);
     if (videoMatch) {
       void AssetDB.get<Blob>(AssetDB.STORE_ASSETS, videoMatch.id)
         .then((blob) => {
@@ -1623,97 +1712,11 @@ export function App() {
     .map((line, idx) => ({ line, idx }))
     .filter(({ line }) => line.kind === "title" || line.kind === "label" || line.cg)
     .slice(0, 48);
-  const sceneOptions = collectScriptScenes();
+  const sceneOptions = SCRIPT_SCENES;
   const filteredScenes = sceneOptions.filter((scene) => {
     const q = sceneQuery.trim().toLowerCase();
     return !q || scene.toLowerCase().includes(q);
   });
-  const resolveSceneBackground = useCallback(
-    (scene: string | undefined) => {
-      if (!scene) return DEFAULT_BG;
-      const override = sceneBgOverrides[scene];
-      if (override?.source === "url" && override.value) return override.value;
-      if (override?.source === "asset" && bgAssetUrlCacheRef.current[override.value]) {
-        return bgAssetUrlCacheRef.current[override.value];
-      }
-      return getSceneBg(scene) || DEFAULT_BG;
-    },
-    [sceneBgOverrides],
-  );
-
-  const ensureBackgroundAssetUrl = useCallback(async (assetId: string) => {
-    const cached = bgAssetUrlCacheRef.current[assetId];
-    if (cached) return cached;
-    const blob = await AssetDB.get<Blob>(AssetDB.STORE_ASSETS, assetId);
-    if (!blob) return "";
-    const url = URL.createObjectURL(blob);
-    bgAssetUrlCacheRef.current[assetId] = url;
-    return url;
-  }, []);
-
-  const getBackgroundAssetLabel = useCallback(
-    (assetId: string) => {
-      return (
-        manifestState.backgrounds?.find((item) => item.id === assetId)?.label ||
-        manifestState.bg?.find((item) => item.id === assetId)?.label ||
-        assetId
-      );
-    },
-    [manifestState.backgrounds, manifestState.bg],
-  );
-
-  const applySceneBackground = useCallback(
-    async (scene: string, assetId: string | null) => {
-      const nextOverrides = { ...sceneBgOverrides };
-      if (!assetId) {
-        delete nextOverrides[scene];
-        setSceneBgOverrides(nextOverrides);
-        writeSceneBgOverrides(nextOverrides);
-        return;
-      }
-      nextOverrides[scene] = { source: "asset", value: assetId, label: getBackgroundAssetLabel(assetId) };
-      setSceneBgOverrides(nextOverrides);
-      writeSceneBgOverrides(nextOverrides);
-      if (scene === curLine?.scene) {
-        const url = await ensureBackgroundAssetUrl(assetId);
-        if (url) {
-          setBgUrl(url);
-          lastBgRef.current = url;
-          pulseUi("scene");
-        }
-      }
-    },
-    [curLine?.scene, ensureBackgroundAssetUrl, getBackgroundAssetLabel, pulseUi, sceneBgOverrides],
-  );
-
-  const previewSceneBackground = useCallback(
-    async (scene: string, assetId?: string | null) => {
-      const override = sceneBgOverrides[scene];
-      if (assetId) {
-        const url = await ensureBackgroundAssetUrl(assetId);
-        if (url) {
-          setBgUrl(url);
-          lastBgRef.current = url;
-          pulseUi("scene");
-        }
-        return;
-      }
-      if (override?.source === "asset") {
-        const url = await ensureBackgroundAssetUrl(override.value);
-        if (url) {
-          setBgUrl(url);
-          lastBgRef.current = url;
-          pulseUi("scene");
-        }
-        return;
-      }
-      const builtIn = getSceneBg(scene) || DEFAULT_BG;
-      setBgUrl(builtIn);
-      lastBgRef.current = builtIn;
-      pulseUi("scene");
-    },
-    [ensureBackgroundAssetUrl, pulseUi, sceneBgOverrides],
-  );
 
   const settingsPanelContent = (
     <>
@@ -1841,7 +1844,7 @@ export function App() {
             className="btn"
             disabled={!selectedSceneName || !customSceneBgUrl.trim()}
             onClick={() => {
-              const nextOverrides = {
+              const nextOverrides: Record<string, SceneBgOverride> = {
                 ...sceneBgOverrides,
                 [selectedSceneName]: { source: "url", value: customSceneBgUrl.trim(), label: customSceneBgUrl.trim() },
               };
