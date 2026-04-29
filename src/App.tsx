@@ -368,14 +368,20 @@ const DustCanvas = memo(function DustCanvas({
   return <canvas id="dust" ref={canvasRef} />;
 });
 
-const StageSprites = memo(function StageSprites({ stageChars }: { stageChars: StageCharacter[] }) {
+const StageSprites = memo(function StageSprites({
+  stageChars,
+  spriteReadyMap,
+}: {
+  stageChars: StageCharacter[];
+  spriteReadyMap: Record<string, boolean>;
+}) {
   return (
     <div id="stage">
       {stageChars.map((ch) => (
         <div
           key={ch.name}
-          className={`sprite-multi show ${ch.position} expression-${ch.expression} ${ch.isSpeaking ? "speaking" : "not-speaking"}`}
-          style={{ backgroundImage: `url("${ch.spriteUrl}")` }}
+          className={`sprite-multi show ${ch.position} expression-${ch.expression} ${spriteReadyMap[ch.spriteUrl] ? "ready" : "loading"} ${ch.isSpeaking ? "speaking" : "not-speaking"}`}
+          style={{ backgroundImage: spriteReadyMap[ch.spriteUrl] ? `url("${ch.spriteUrl}")` : undefined }}
         />
       ))}
     </div>
@@ -430,6 +436,7 @@ export function App() {
   const [showRain, setShowRain] = useState(false);
   const [sceneBlur, setSceneBlur] = useState(false);
   const [stageChars, setStageChars] = useState<StageCharacter[]>([]);
+  const [spriteReadyMap, setSpriteReadyMap] = useState<Record<string, boolean>>({});
   const [bgmPlaying, setBgmPlaying] = useState(false);
   const [bgmMuted, setBgmMuted] = useState(false);
   const [currentBgmId, setCurrentBgmId] = useState("");
@@ -555,7 +562,12 @@ export function App() {
         upcoming.add(ch.spriteUrl);
       });
     }
-    upcoming.forEach((url) => queueImagePreload(url));
+    upcoming.forEach((url) => {
+      queueImagePreload(url);
+      void ensureImageReady(url).then(() => {
+        setSpriteReadyMap((prev) => (prev[url] ? prev : { ...prev, [url]: true }));
+      });
+    });
   }, [index, phase]);
 
   useEffect(() => {
@@ -595,7 +607,7 @@ export function App() {
             if (!cancelled) {
               setTransitionActive(false);
             }
-          }, nextTransition === "dissolve" ? 520 : 700);
+          }, nextTransition === "dissolve" ? 620 : 820);
         });
 
       return () => {
@@ -651,7 +663,12 @@ export function App() {
         upcoming.add(ch.spriteUrl);
       });
     }
-    upcoming.forEach((url) => queueImagePreload(url));
+    upcoming.forEach((url) => {
+      queueImagePreload(url);
+      void ensureImageReady(url).then(() => {
+        setSpriteReadyMap((prev) => (prev[url] ? prev : { ...prev, [url]: true }));
+      });
+    });
   }, [curLine, index, phase]);
 
   const crossfadeBgm = useCallback(
@@ -1547,12 +1564,12 @@ export function App() {
 
       {phase === "playing" && (
         <div className={`game-screen ${effectClasses} ${bgmMoodClass}`}>
-          <div className="bg-container">
+          <div className={`bg-container ${transitionActive ? "cinematic" : ""}`}>
             {prevBgUrl && transitionActive && transitionType === "dissolve" && (
-              <div className="bg-layer bg-prev" style={{ backgroundImage: `url("${prevBgUrl}")` }} />
+              <div className="bg-layer bg-prev bg-cinematic-prev" style={{ backgroundImage: `url("${prevBgUrl}")` }} />
             )}
             <div
-              className={`bg-layer bg-current ${transitionActive && transitionType === "dissolve" ? "bg-dissolve-in" : ""}`}
+              className={`bg-layer bg-current ${transitionActive && transitionType === "dissolve" ? "bg-dissolve-in bg-cinematic-next" : ""}`}
               style={{ backgroundImage: bgUrl ? `url("${bgUrl}")` : undefined }}
             />
           </div>
@@ -1562,7 +1579,7 @@ export function App() {
           <DustCanvas active lowPerfMode={lowPerfMode} />
           <RainCanvas active={showRain} lowPerfMode={lowPerfMode} />
 
-          <StageSprites stageChars={stageChars} />
+          <StageSprites stageChars={stageChars} spriteReadyMap={spriteReadyMap} />
 
           <div id="fx" />
 
