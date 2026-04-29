@@ -29,6 +29,8 @@ import viteConfigSource from "../vite.config.ts?raw";
 const KEY_SETTINGS = "vn_settings_v1";
 const KEY_MANIFEST = "vn_manifest_v1";
 const KEY_SAVE = "vn_save_v1";
+const KEY_SAVE_SLOTS = "vn_save_slots_v1";
+const SAVE_SLOT_COUNT = 8;
 
 const DEFAULT_SETTINGS = {
   typeMs: 18,
@@ -49,7 +51,27 @@ const DEFAULT_SETTINGS = {
 type Settings = typeof DEFAULT_SETTINGS;
 type GamePhase = "warning" | "title" | "playing" | "credits";
 type LogItem = { who: string; text: string };
-type Manifest = { bgm?: { id: string; label: string }[]; sfx?: { id: string; label: string }[] };
+type AssetEntry = { id: string; label: string };
+type Manifest = {
+  backgrounds?: AssetEntry[];
+  bg?: AssetEntry[];
+  sprite?: AssetEntry[];
+  bgm?: AssetEntry[];
+  sfx?: AssetEntry[];
+};
+type SaveSlot = {
+  slot: number;
+  index: number;
+  log: LogItem[];
+  act: string;
+  scene: string;
+  speaker: string;
+  text: string;
+  bgmName: string;
+  savedAt: string;
+  progress: string;
+};
+type SfxLayer = "ui" | "scene" | "story" | "cg" | "emotion";
 
 const PAUSE_CHARS: Record<string, number> = {
   "。": 6,
@@ -65,6 +87,9 @@ const PAUSE_CHARS: Record<string, number> = {
   "?": 4,
   ",": 2,
 };
+
+const SMART_PAUSE_WORDS = ["……", "顿了顿", "沉默", "低声", "轻声", "迟疑", "犹豫", "停了一下", "想了想"];
+const EMOTION_WORDS = ["惊", "怕", "慌", "痛", "哭", "怒", "冷", "颤", "喘", "哽", "失控", "崩溃", "压抑", "紧张"];
 
 const CREDITS_BLOCKS = [
   { role: "原作 / 编剧", names: "Ray、Justin" },
@@ -99,6 +124,78 @@ function readJson<T extends Record<string, unknown>>(key: string, fallback: T): 
     return { ...fallback, ...JSON.parse(raw) };
   } catch {
     return fallback;
+  }
+}
+
+function safeParse<T>(raw: string | null, fallback: T): T {
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function normalizeManifest(manifest: Manifest): Manifest {
+  const backgrounds = [...(manifest.backgrounds || []), ...(manifest.bg || [])];
+  const dedupedBackgrounds = Array.from(new Map(backgrounds.map((item) => [item.id, item])).values());
+  return {
+    ...manifest,
+    backgrounds: dedupedBackgrounds,
+    bg: undefined,
+  };
+}
+
+function readSaveSlots(): Array<SaveSlot | null> {
+  const slots = safeParse<Array<SaveSlot | null>>(localStorage.getItem(KEY_SAVE_SLOTS), []);
+  return Array.from({ length: SAVE_SLOT_COUNT }, (_, idx) => slots[idx] || null);
+}
+
+function writeSaveSlots(slots: Array<SaveSlot | null>) {
+  localStorage.setItem(KEY_SAVE_SLOTS, JSON.stringify(slots.slice(0, SAVE_SLOT_COUNT)));
+}
+
+function buildSaveSnapshot(index: number, log: LogItem[], currentAct: string, currentBgmName: string): SaveSlot {
+  const curLine = SCRIPT.lines[index];
+  return {
+    slot: 0,
+    index,
+    log: log.slice(-100),
+    act: currentAct || curLine?.act || "",
+    scene: curLine?.scene || "",
+    speaker: curLine?.speaker || "",
+    text: curLine?.text || "",
+    bgmName: currentBgmName || "",
+    savedAt: new Date().toISOString(),
+    progress: `${Math.min(index + 1, SCRIPT.lines.length)}/${SCRIPT.lines.length}`,
+  };
+}
+
+function getLineTypingDelay(text: string, index: number, baseMs: number) {
+  const char = text[index - 1] || "";
+  let delay = baseMs * (PAUSE_CHARS[char] || 1);
+  const segment = text.slice(Math.max(0, index - 24), index + 6);
+  if (SMART_PAUSE_WORDS.some((word) => segment.includes(word))) {
+    delay *= 1.4;
+  }
+  if (EMOTION_WORDS.some((word) => segment.includes(word))) {
+    delay *= 1.18;
+  }
+  if (/[!?！？]/.test(char)) {
+    delay *= 1.2;
+  }
+  if (text.length > 36) {
+    delay *= 1.08;
+  }
+  return Math.max(10, Math.min(240, delay));
+}
+
+function getSavedAtLabel(savedAt: string) {
+  if (!savedAt) return "未记录";
+  try {
+    return new Date(savedAt).toLocaleString();
+  } catch {
+    return savedAt;
   }
 }
 
@@ -446,6 +543,7 @@ export function App() {
   const [titleReady, setTitleReady] = useState(false);
   const [textVisible, setTextVisible] = useState(true);
   const [cgVisible, setCgVisible] = useState(false);
+  const [cgClosing, setCgClosing] = useState(false);
   const [cgTitle, setCgTitle] = useState("");
   const [cgImageUrl, setCgImageUrl] = useState("");
   const [lowPerfMode, setLowPerfMode] = useState(false);
@@ -455,6 +553,13 @@ export function App() {
   const [creditsRollReady, setCreditsRollReady] = useState(false);
   const [showQaPanel, setShowQaPanel] = useState(false);
   const [openQaIndex, setOpenQaIndex] = useState<number | null>(null);
+  const [saveSlots, setSaveSlots] = useState<Array<SaveSlot | null>>(() => readSaveSlots());
+  const [selectedSaveSlot, setSelectedSaveSlot] = useState(0);
+  const [assetQuery, setAssetQuery] = useState("");
+  const [assetFilter, setAssetFilter] = useState<keyof Manifest | "all">("all");
+  const [manifestState, setManifestState] = useState<Manifest>(() => normalizeManifest(safeParse<Manifest>(localStorage.getItem(KEY_MANIFEST), {})));
+  const [openingPreludeVisible, setOpeningPreludeVisible] = useState(false);
+  const [openingPreludeText, setOpeningPreludeText] = useState("第一幕 · 正在展开");
 
   const autoTimeoutRef = useRef<number | null>(null);
   const typingFrameRef = useRef<number | null>(null);
@@ -467,6 +572,11 @@ export function App() {
   const sfxRef = useRef<HTMLAudioElement>(new Audio());
   const bgmUrlRef = useRef("");
   const sfxUrlRef = useRef("");
+  const audioCtxRef = useRef<AudioContext | null>(null);
+  const cgCloseTimerRef = useRef<number | null>(null);
+  const preludeTimerRef = useRef<number | null>(null);
+  const uiPulseRef = useRef<number | null>(null);
+  const cgSeenRef = useRef("");
 
   const curLine = SCRIPT.lines[index];
 
@@ -515,6 +625,70 @@ export function App() {
     return () => window.clearTimeout(timer);
   }, [lowPerfMode, phase]);
 
+  const ensureAudioContext = useCallback(() => {
+    if (audioCtxRef.current) return audioCtxRef.current;
+    const Ctor = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctor) return null;
+    audioCtxRef.current = new Ctor();
+    return audioCtxRef.current;
+  }, []);
+
+  const playLayerTone = useCallback(
+    (layer: SfxLayer) => {
+      if (settings.sfxVol <= 0) return;
+      const ctx = ensureAudioContext();
+      if (!ctx) return;
+      if (ctx.state === "suspended") {
+        void ctx.resume().catch(() => undefined);
+      }
+
+      const master = ctx.createGain();
+      const filter = ctx.createBiquadFilter();
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      const vol = settings.sfxVol / 100;
+      const now = ctx.currentTime;
+      const config: Record<SfxLayer, { type: OscillatorType; base: number; peak: number; dur: number; q: number }> = {
+        ui: { type: "triangle", base: 640, peak: 920, dur: 0.08, q: 0.75 },
+        scene: { type: "sine", base: 260, peak: 380, dur: 0.16, q: 0.9 },
+        story: { type: "triangle", base: 180, peak: 300, dur: 0.24, q: 0.82 },
+        cg: { type: "sine", base: 120, peak: 220, dur: 0.36, q: 0.7 },
+        emotion: { type: "square", base: 320, peak: 540, dur: 0.28, q: 1.1 },
+      };
+      const item = config[layer];
+      master.gain.setValueAtTime(vol * 0.22, now);
+      master.gain.exponentialRampToValueAtTime(vol * 0.04, now + item.dur);
+      filter.type = layer === "cg" ? "lowpass" : "bandpass";
+      filter.frequency.setValueAtTime(item.base, now);
+      filter.frequency.exponentialRampToValueAtTime(item.peak, now + item.dur * 0.55);
+      filter.Q.value = item.q;
+      osc.type = item.type;
+      osc.frequency.setValueAtTime(item.base, now);
+      osc.frequency.exponentialRampToValueAtTime(item.peak, now + item.dur * 0.32);
+      osc.connect(filter);
+      filter.connect(gain);
+      gain.connect(master);
+      master.connect(ctx.destination);
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.exponentialRampToValueAtTime(0.9, now + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + item.dur);
+      osc.start(now);
+      osc.stop(now + item.dur + 0.02);
+    },
+    [ensureAudioContext, settings.sfxVol],
+  );
+
+  const pulseUi = useCallback(
+    (layer: SfxLayer = "ui") => {
+      if (uiPulseRef.current) window.clearTimeout(uiPulseRef.current);
+      playLayerTone(layer);
+      uiPulseRef.current = window.setTimeout(() => {
+        uiPulseRef.current = null;
+      }, 120);
+    },
+    [playLayerTone],
+  );
+
   useEffect(() => {
     const root = document.documentElement.style;
     root.setProperty("--dim", `${settings.dim / 100}`);
@@ -533,10 +707,12 @@ export function App() {
 
   const refreshBgmList = useCallback(() => {
     try {
-      const manifest = JSON.parse(localStorage.getItem(KEY_MANIFEST) || "{}") as Manifest;
+      const manifest = normalizeManifest(safeParse<Manifest>(localStorage.getItem(KEY_MANIFEST), {}));
+      setManifestState(manifest);
       setBgmList(manifest.bgm || []);
       setSfxList(manifest.sfx || []);
     } catch {
+      setManifestState({});
       setBgmList([]);
       setSfxList([]);
     }
@@ -545,6 +721,10 @@ export function App() {
   useEffect(() => {
     refreshBgmList();
   }, [refreshBgmList]);
+
+  useEffect(() => {
+    setSaveSlots(readSaveSlots());
+  }, []);
 
   useEffect(() => {
     queueImagePreload(TITLE_SCREEN_BG);
@@ -595,6 +775,7 @@ export function App() {
         setPrevBgUrl("");
         setTransitionActive(false);
       }
+      pulseUi("scene");
 
       void ensureImageReady(nextBg)
         .catch(() => undefined)
@@ -638,19 +819,29 @@ export function App() {
   }, [curLine, phase, triggerEffect]);
 
   useEffect(() => {
-    if (phase !== "playing" || !curLine?.cg) return;
+    if (cgCloseTimerRef.current) {
+      window.clearTimeout(cgCloseTimerRef.current);
+      cgCloseTimerRef.current = null;
+    }
+    if (phase !== "playing" || !curLine?.cg || cgVisible) return;
     setCgTitle(curLine.cg);
-    let cancelled = false;
     const cgUrl = getSceneBg(curLine.scene) || bgUrl || DEFAULT_BG;
+    const cgKey = `${index}:${curLine.cg}`;
+    if (cgSeenRef.current === cgKey) return;
+    let cancelled = false;
+    pulseUi("cg");
     void ensureImageReady(cgUrl).then(() => {
       if (cancelled) return;
       setCgImageUrl(cgUrl);
+      setCgClosing(false);
       setCgVisible(true);
+      cgSeenRef.current = cgKey;
+      setOpeningPreludeVisible(false);
     });
     return () => {
       cancelled = true;
     };
-  }, [bgUrl, curLine, phase]);
+  }, [bgUrl, cgVisible, curLine, index, phase, pulseUi]);
 
   useEffect(() => {
     if (phase !== "playing" || !curLine) return;
@@ -820,6 +1011,9 @@ export function App() {
 
     setCurrentAct(curLine.act);
     setTextVisible(false);
+    if (curLine.kind !== "choice") {
+      pulseUi(curLine.effect && curLine.effect !== "none" ? "emotion" : "story");
+    }
     if (typingFrameRef.current) cancelAnimationFrame(typingFrameRef.current);
     if (typingDelayRef.current) window.clearTimeout(typingDelayRef.current);
     typingDelayRef.current = window.setTimeout(() => {
@@ -838,12 +1032,11 @@ export function App() {
       let lastTime = performance.now();
       let frameId = 0;
       const frame = (now: number) => {
-        const previousChar = nextText[ci - 1] || "";
-        const pauseMultiplier = PAUSE_CHARS[previousChar] || 1;
-        const effectiveDelay = settings.typeMs * pauseMultiplier;
+        const effectiveDelay = getLineTypingDelay(nextText, ci, settings.typeMs);
         const delta = now - lastTime;
         if (delta >= effectiveDelay) {
-          const step = pauseMultiplier > 1 ? 1 : Math.max(1, Math.floor(delta / settings.typeMs));
+          const previousChar = nextText[ci - 1] || "";
+          const step = PAUSE_CHARS[previousChar] ? 1 : Math.max(1, Math.floor(delta / Math.max(1, settings.typeMs)));
           ci = Math.min(nextText.length, ci + step);
           setDisplayedText(nextText.slice(0, ci));
           lastTime = now;
@@ -866,20 +1059,123 @@ export function App() {
     };
   }, [curLine, phase, settings.typeMs, skip]);
 
-  const saveGame = useCallback(() => {
-    const data = {
-      index,
-      log: log.slice(-50),
-      act: currentAct,
-      bgmName: currentBgmName,
-    };
-    localStorage.setItem(KEY_SAVE, JSON.stringify(data));
-  }, [currentAct, currentBgmName, index, log]);
+  const commitSaveSlot = useCallback(
+    (slotIndex: number) => {
+      const data = { ...buildSaveSnapshot(index, log, currentAct, currentBgmName), slot: slotIndex };
+      const nextSlots = readSaveSlots();
+      nextSlots[slotIndex] = data;
+      writeSaveSlots(nextSlots);
+      setSaveSlots(nextSlots);
+      localStorage.setItem(KEY_SAVE, JSON.stringify(data));
+      return data;
+    },
+    [currentAct, currentBgmName, index, log],
+  );
+
+  const saveGame = useCallback(
+    (slotIndex = selectedSaveSlot, persistSlot = true) => {
+      if (persistSlot) {
+        commitSaveSlot(slotIndex);
+      } else {
+        const data = buildSaveSnapshot(index, log, currentAct, currentBgmName);
+        localStorage.setItem(KEY_SAVE, JSON.stringify(data));
+      }
+      pulseUi("ui");
+    },
+    [commitSaveSlot, currentAct, currentBgmName, index, log, pulseUi, selectedSaveSlot],
+  );
+
+  const loadSaveSlot = useCallback(
+    (slotIndex: number) => {
+      const slot = saveSlots[slotIndex];
+      if (!slot) return;
+      setPhase("playing");
+      setIndex(Math.min(SCRIPT.lines.length - 1, slot.index));
+      setLog(slot.log || []);
+      setCurrentAct(slot.act || "");
+      setActivePanel(null);
+      setShowLog(false);
+      setAuto(false);
+      setSkip(false);
+      setOpeningPreludeVisible(false);
+      setCgClosing(false);
+      cgSeenRef.current = "";
+      stopBgm();
+      const match = bgmList.find((item) => item.label === slot.bgmName || item.label.includes(slot.bgmName || ""));
+      if (match) {
+        void loadAndPlayBgm(match.id);
+      } else {
+        setCurrentBgmId("");
+        setCurrentBgmName(slot.bgmName || "");
+      }
+      pulseUi("scene");
+    },
+    [bgmList, loadAndPlayBgm, pulseUi, saveSlots, stopBgm],
+  );
+
+  const continueLastGame = useCallback(() => {
+    const lastSave = safeParse<SaveSlot | null>(localStorage.getItem(KEY_SAVE), null);
+    if (!lastSave) return;
+    setPhase("playing");
+    setIndex(Math.min(SCRIPT.lines.length - 1, lastSave.index));
+    setLog(lastSave.log || []);
+    setCurrentAct(lastSave.act || "");
+    setActivePanel(null);
+    setShowLog(false);
+    setAuto(false);
+    setSkip(false);
+    setOpeningPreludeVisible(false);
+    setCgClosing(false);
+    cgSeenRef.current = "";
+    stopBgm();
+    const match = bgmList.find((item) => item.label === lastSave.bgmName || item.label.includes(lastSave.bgmName || ""));
+    if (match) {
+      void loadAndPlayBgm(match.id);
+    } else {
+      setCurrentBgmId("");
+      setCurrentBgmName(lastSave.bgmName || "");
+    }
+    pulseUi("scene");
+  }, [bgmList, loadAndPlayBgm, pulseUi, stopBgm]);
+
+  const deleteSaveSlot = useCallback(
+    (slotIndex: number) => {
+      const nextSlots = readSaveSlots();
+      nextSlots[slotIndex] = null;
+      writeSaveSlots(nextSlots);
+      setSaveSlots(nextSlots);
+      pulseUi("ui");
+    },
+    [pulseUi],
+  );
+
+  const closeCg = useCallback(() => {
+    if (!cgVisible) return;
+    cgSeenRef.current = `${index}:${curLine?.cg || cgTitle}`;
+    setCgClosing(true);
+    pulseUi("cg");
+    if (cgCloseTimerRef.current) window.clearTimeout(cgCloseTimerRef.current);
+    cgCloseTimerRef.current = window.setTimeout(() => {
+      setCgVisible(false);
+      setCgClosing(false);
+      cgCloseTimerRef.current = null;
+    }, 240);
+  }, [cgVisible, cgTitle, curLine?.cg, index, pulseUi]);
+
+  const triggerOpeningPrelude = useCallback((text: string) => {
+    if (preludeTimerRef.current) window.clearTimeout(preludeTimerRef.current);
+    setOpeningPreludeText(text);
+    setOpeningPreludeVisible(true);
+    preludeTimerRef.current = window.setTimeout(() => {
+      setOpeningPreludeVisible(false);
+      preludeTimerRef.current = null;
+    }, 1500);
+  }, []);
 
   const handleNext = useCallback(() => {
     if (phase !== "playing" || !curLine) return;
     if (cgVisible) {
-      setCgVisible(false);
+      closeCg();
       return;
     }
     if (typing) {
@@ -899,14 +1195,18 @@ export function App() {
     if (curLine.speaker && curLine.text) {
       setLog((prev) => [...prev, { who: curLine.speaker || "旁白", text: curLine.text || "" }].slice(-100));
     }
+    if (curLine.cg) {
+      pulseUi("cg");
+    }
     setIndex((value) => Math.min(SCRIPT.lines.length, value + 1));
-  }, [cgVisible, curLine, phase, typing]);
+  }, [cgVisible, closeCg, curLine, phase, pulseUi, typing]);
 
   const handlePrev = useCallback(() => {
     if (phase !== "playing") return;
     setAuto(false);
     setSkip(false);
     setTyping(false);
+    cgSeenRef.current = "";
     if (index <= 0) return;
     let nextIndex = index - 1;
     while (nextIndex > 0) {
@@ -921,6 +1221,7 @@ export function App() {
   }, [index, phase]);
 
   const handleChoice = useCallback((cmd: string) => {
+    cgSeenRef.current = "";
     if (cmd.startsWith("@jump")) {
       const label = cmd.replace("@jump", "").trim();
       const target = SCRIPT.labelMap.get(label);
@@ -948,18 +1249,24 @@ export function App() {
     if (startTransitioning) return;
     setStartTransitioning(true);
     setScreenFlashVisible(true);
+    triggerOpeningPrelude("第一幕 · 章节开启");
     setIndex(0);
     setLog([]);
     lastBgRef.current = "";
     setActivePanel(null);
+    setCgVisible(false);
+    setCgClosing(false);
+    cgSeenRef.current = "";
+    setOpeningPreludeVisible(true);
+    stopBgm();
     window.setTimeout(() => {
       setPhase("playing");
       setHudAwake(true);
-    }, 260);
+    }, lowPerfMode ? 180 : 260);
     window.setTimeout(() => {
       setScreenFlashVisible(false);
       setStartTransitioning(false);
-    }, 720);
+    }, lowPerfMode ? 620 : 720);
   };
 
   const toggleBgm = useCallback(() => {
@@ -981,6 +1288,7 @@ export function App() {
   }, [bgmMuted]);
 
   const togglePanel = (name: string) => {
+    pulseUi("ui");
     setActivePanel((prev) => (prev === name ? null : name));
   };
 
@@ -995,10 +1303,9 @@ export function App() {
       const id = `${kind}_${crypto.randomUUID()}`;
       await AssetDB.put(AssetDB.STORE_ASSETS, id, file);
       try {
-        const manifest = JSON.parse(localStorage.getItem(KEY_MANIFEST) || "{}") as Record<string, { id: string; label: string }[]>;
+        const manifest = normalizeManifest(safeParse<Manifest>(localStorage.getItem(KEY_MANIFEST), {}));
         const key = kind === "bg" ? "backgrounds" : kind;
-        manifest[key] = manifest[key] || [];
-        manifest[key].unshift({ id, label });
+        manifest[key] = [ { id, label }, ...((manifest[key] || []) as AssetEntry[]) ];
         localStorage.setItem(KEY_MANIFEST, JSON.stringify(manifest));
         refreshBgmList();
       } catch {
@@ -1033,7 +1340,7 @@ export function App() {
       if (phase !== "playing") return;
       if (cgVisible && (event.key === " " || event.key === "Enter" || event.key === "Escape")) {
         event.preventDefault();
-        setCgVisible(false);
+        closeCg();
         return;
       }
       if ((event.key === " " || event.key === "Enter") && !activePanel && !showLog) {
@@ -1055,7 +1362,7 @@ export function App() {
     return () => {
       window.removeEventListener("keydown", handler);
     };
-  }, [activePanel, cgVisible, handleNext, handlePrev, phase, saveGame, showLog, showQaPanel]);
+  }, [activePanel, cgVisible, closeCg, handleNext, handlePrev, phase, saveGame, showLog, showQaPanel]);
 
   useEffect(() => {
     if (phase !== "playing") {
@@ -1082,9 +1389,9 @@ export function App() {
 
   useEffect(() => {
     if (phase === "playing" && index > 0) {
-      saveGame();
+      saveGame(selectedSaveSlot, false);
     }
-  }, [index, phase, saveGame]);
+  }, [index, phase, saveGame, selectedSaveSlot]);
 
   const handleExportAllCodeTxt = () => {
     const files = [
@@ -1151,6 +1458,10 @@ export function App() {
       if (codeTxtUrlRef.current) URL.revokeObjectURL(codeTxtUrlRef.current);
       if (bgmUrlRef.current) URL.revokeObjectURL(bgmUrlRef.current);
       if (sfxUrlRef.current) URL.revokeObjectURL(sfxUrlRef.current);
+      if (cgCloseTimerRef.current) window.clearTimeout(cgCloseTimerRef.current);
+      if (preludeTimerRef.current) window.clearTimeout(preludeTimerRef.current);
+      if (uiPulseRef.current) window.clearTimeout(uiPulseRef.current);
+      audioCtxRef.current?.close().catch(() => undefined);
     };
   }, []);
 
@@ -1172,6 +1483,23 @@ export function App() {
   const bgmMoodClass = getBgmMoodClass(currentBgmLabel);
   const sceneProgress = `${Math.min(index + 1, SCRIPT.lines.length)}/${SCRIPT.lines.length}`;
   const titlePanelOpen = phase === "title" && (activePanel === "settings" || activePanel === "assets");
+  const hasContinueSave = Boolean(localStorage.getItem(KEY_SAVE));
+  const resourceEntries = Object.entries(manifestState).flatMap(([kind, items]) =>
+    (items || []).map((item) => ({
+      ...item,
+      kind,
+    })),
+  );
+  const filteredResources = resourceEntries.filter((item) => {
+    const matchesKind = assetFilter === "all" || assetFilter === item.kind;
+    const q = assetQuery.trim().toLowerCase();
+    const matchesQuery = !q || item.label.toLowerCase().includes(q) || item.id.toLowerCase().includes(q);
+    return matchesKind && matchesQuery;
+  });
+  const debugMarkers = SCRIPT.lines
+    .map((line, idx) => ({ line, idx }))
+    .filter(({ line }) => line.kind === "title" || line.kind === "label" || line.cg)
+    .slice(0, 48);
 
   const settingsPanelContent = (
     <>
@@ -1243,6 +1571,41 @@ export function App() {
       </div>
       <div className="card">
         <div className="row">
+          <span className="label">搜索资源</span>
+          <input value={assetQuery} onChange={(e) => setAssetQuery(e.target.value)} placeholder="输入文件名或标签" />
+        </div>
+        <div className="row">
+          {(["all", "backgrounds", "sprite", "bgm", "sfx"] as const).map((kind) => (
+            <button
+              key={kind}
+              className="btn"
+              aria-pressed={assetFilter === kind}
+              onClick={() => setAssetFilter(kind)}
+            >
+              {kind === "all" ? "全部" : kind}
+            </button>
+          ))}
+          <button
+            className="btn"
+            onClick={() => {
+              const next = prompt("批量重命名：输入前缀");
+              if (!next) return;
+              const updated: Manifest = { ...manifestState };
+              (["backgrounds", "sprite", "bgm", "sfx"] as const).forEach((kind) => {
+                updated[kind] = (updated[kind] || []).map((item, idx) => ({ ...item, label: `${next}-${idx + 1}` }));
+              });
+              localStorage.setItem(KEY_MANIFEST, JSON.stringify(updated));
+              setManifestState(updated);
+              refreshBgmList();
+            }}
+          >
+            批量改名
+          </button>
+        </div>
+        <div className="tiny">过滤后仅显示符合条件的资源，方便你快速查找。</div>
+      </div>
+      <div className="card">
+        <div className="row">
           <span className="label">已上传BGM</span>
           <span className="tiny mono">{bgmList.length}</span>
         </div>
@@ -1250,7 +1613,188 @@ export function App() {
           <span className="label">已上传音效</span>
           <span className="tiny mono">{sfxList.length}</span>
         </div>
+        <div className="row">
+          <span className="label">资源总数</span>
+          <span className="tiny mono">{filteredResources.length}/{resourceEntries.length}</span>
+        </div>
         <div className="tiny">建议文件名包含脚本关键词，便于自动匹配。</div>
+      </div>
+      <div className="card">
+        <div className="panel-title">资源列表</div>
+        <div className="resource-list">
+          {filteredResources.length === 0 && <div className="tiny">没有符合条件的资源。</div>}
+          {filteredResources.slice(0, 24).map((item) => (
+            <div key={`${item.kind}_${item.id}`} className="resource-item">
+              <div>
+                <div className="resource-name">{item.label}</div>
+                <div className="tiny mono">{item.kind} · {item.id}</div>
+              </div>
+              <button
+                className="btn"
+                onClick={() => {
+                  navigator.clipboard?.writeText(item.label).catch(() => undefined);
+                  setAssetQuery(item.label);
+                }}
+              >
+                复制名
+              </button>
+            </div>
+          ))}
+        </div>
+      </div>
+    </>
+  );
+
+  const savePanelContent = (
+    <>
+      <div className="card">
+        <div className="row">
+          <span className="label">当前槽位</span>
+          <select value={selectedSaveSlot} onChange={(e) => setSelectedSaveSlot(Number(e.target.value))}>
+            {Array.from({ length: SAVE_SLOT_COUNT }, (_, idx) => (
+              <option key={idx} value={idx}>
+                槽位 {idx + 1}
+              </option>
+            ))}
+          </select>
+          <button className="btn" onClick={() => saveGame(selectedSaveSlot, true)}>
+            存到当前槽
+          </button>
+          <button className="btn" onClick={() => saveGame(selectedSaveSlot, false)}>
+            仅更新继续
+          </button>
+        </div>
+        <div className="tiny">`仅更新继续` 会保留多槽存档，同时刷新标题页的“继续上次”。</div>
+      </div>
+      <div className="save-grid">
+        {saveSlots.map((slot, idx) => (
+          <div key={idx} className={`save-slot ${selectedSaveSlot === idx ? "selected" : ""}`}>
+            <div className="row save-slot-top">
+              <span className="label">槽位 {idx + 1}</span>
+              <span className="tiny mono">{slot ? slot.progress : "空槽"}</span>
+            </div>
+            <div className="tiny">{slot ? slot.act || "未命名章节" : "尚未存档"}</div>
+            <div className="tiny">{slot ? `${slot.speaker || "旁白"} · ${slot.text || "……"}` : "点击保存后会写入这一格"}</div>
+            <div className="tiny mono">{slot ? getSavedAtLabel(slot.savedAt) : "—"}</div>
+            <div className="row">
+              <button className="btn" onClick={() => setSelectedSaveSlot(idx)}>
+                选中
+              </button>
+              <button className="btn" onClick={() => saveGame(idx, true)}>
+                保存
+              </button>
+              <button className="btn" onClick={() => loadSaveSlot(idx)} disabled={!slot}>
+                读取
+              </button>
+              <button className="btn" onClick={() => deleteSaveSlot(idx)} disabled={!slot}>
+                删除
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    </>
+  );
+
+  const debugPanelContent = (
+    <>
+      <div className="card">
+        <div className="panel-title">作者调试</div>
+        <div className="row">
+          <button
+            className="btn"
+            onClick={() => {
+              setIndex(0);
+              setPhase("playing");
+              setActivePanel(null);
+              pulseUi("scene");
+            }}
+          >
+            跳到开头
+          </button>
+          <button
+            className="btn"
+            onClick={() => {
+              const jump = debugMarkers[Math.floor(Math.random() * Math.max(1, debugMarkers.length))];
+              if (jump) {
+                setIndex(jump.idx);
+                setPhase("playing");
+                pulseUi("scene");
+              }
+            }}
+          >
+            随机跳章
+          </button>
+          <button
+            className="btn"
+            onClick={() => {
+              if (!curLine) return;
+              setCgTitle(curLine.cg || "调试 CG");
+              setCgImageUrl(bgUrl || DEFAULT_BG);
+              setCgVisible(true);
+              pulseUi("cg");
+            }}
+          >
+            触发 CG
+          </button>
+          <button
+            className="btn"
+            onClick={() => {
+              const nextBg = bgUrl === TITLE_SCREEN_BG ? resolveBackgroundUrl(index) : TITLE_SCREEN_BG;
+              setBgUrl(nextBg);
+              lastBgRef.current = nextBg;
+              pulseUi("scene");
+            }}
+          >
+            切背景
+          </button>
+          <button
+            className="btn"
+            onClick={() => {
+              setStageChars((prev) =>
+                prev.map((ch) => ({
+                  ...ch,
+                  expression: ch.expression === "panic" ? "calm" : "panic",
+                })),
+              );
+              pulseUi("emotion");
+            }}
+          >
+            切表情
+          </button>
+          <button
+            className="btn"
+            onClick={() => {
+              triggerEffect("flash-white");
+              pulseUi("ui");
+            }}
+          >
+            闪白
+          </button>
+        </div>
+      </div>
+      <div className="card">
+        <div className="row">
+          <span className="label">章节点</span>
+          <span className="tiny mono">{debugMarkers.length}</span>
+        </div>
+        <div className="debug-list">
+          {debugMarkers.map((item) => (
+            <button
+              key={`${item.idx}_${item.line.kind}`}
+              className="debug-item"
+              onClick={() => {
+                setIndex(item.idx);
+                setPhase("playing");
+                setActivePanel(null);
+                pulseUi("scene");
+              }}
+            >
+              <span className="debug-item-label">{item.line.text || item.line.name || item.line.speaker || "节点"}</span>
+              <span className="tiny mono">#{item.idx}</span>
+            </button>
+          ))}
+        </div>
       </div>
     </>
   );
@@ -1318,6 +1862,10 @@ export function App() {
               <button className="title-btn" onClick={startNewGame}>
                 <span className="title-btn-icon">▶</span>
                 <span>开始游戏</span>
+              </button>
+              <button className="title-btn" onClick={continueLastGame} disabled={!hasContinueSave}>
+                <span className="title-btn-icon">↻</span>
+                <span>继续上次</span>
               </button>
               <button className="title-btn" onClick={() => setActivePanel("settings")}>
                 <span className="title-btn-icon">⚙</span>
@@ -1584,13 +2132,16 @@ export function App() {
           <div id="fx" />
 
           {cgVisible && (
-            <div className="cg-overlay" onClick={() => setCgVisible(false)}>
+            <div className={`cg-overlay ${cgClosing ? "closing" : "showing"}`} onClick={closeCg}>
               <div className="cg-panel" onClick={(event) => event.stopPropagation()}>
+                <div className="cg-header">
+                  <div className="cg-kicker">CG · 镜头展开</div>
+                  <div className="cg-title">{cgTitle}</div>
+                </div>
                 <div className="cg-art" style={{ backgroundImage: `url("${cgImageUrl}")` }} />
                 <div className="cg-meta">
-                  <div className="cg-kicker">CG</div>
-                  <div className="cg-title">{cgTitle}</div>
-                  <button className="btn cg-close" onClick={() => setCgVisible(false)}>
+                  <div className="cg-caption">按空格或点击收束镜头</div>
+                  <button className="btn cg-close" onClick={closeCg}>
                     继续
                   </button>
                 </div>
@@ -1623,8 +2174,11 @@ export function App() {
             <button className="pbtn" aria-pressed={activePanel === "bgm"} onClick={() => togglePanel("bgm")}>
               {bgmPlaying && !bgmMuted ? "♫" : "BGM"}
             </button>
-            <button className="pbtn" onClick={saveGame}>
-              存档
+            <button className="pbtn" onClick={() => togglePanel("save")}>
+              存档槽
+            </button>
+            <button className="pbtn" onClick={() => togglePanel("debug")}>
+              调试
             </button>
             <button className="pbtn" onClick={() => { setPhase("title"); setAuto(false); setSkip(false); }}>
               标题
@@ -1641,6 +2195,14 @@ export function App() {
 
           <div className={`panel ${activePanel === "assets" ? "show" : ""}`}>
             {assetsPanelContent}
+          </div>
+
+          <div className={`panel ${activePanel === "save" ? "show" : ""}`}>
+            {savePanelContent}
+          </div>
+
+          <div className={`panel ${activePanel === "debug" ? "show" : ""}`}>
+            {debugPanelContent}
           </div>
 
           <div className={`panel ${activePanel === "settings" ? "show" : ""}`}>
@@ -1788,6 +2350,17 @@ export function App() {
       <div className={`screen-flash ${screenFlashVisible ? "show start-flash" : ""}`}>
         <div className="screen-flash-title">盛开在谎言之上</div>
       </div>
+
+      {openingPreludeVisible && phase === "playing" && (
+        <div className="opening-prelude">
+          <div className="opening-prelude-backdrop" />
+          <div className="opening-prelude-inner">
+            <div className="opening-prelude-kicker">OPENING</div>
+            <div className="opening-prelude-title">{openingPreludeText}</div>
+            <div className="opening-prelude-copy">黑场、字幕、环境音和轻微推进，正在把这一幕正式拉开。</div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
