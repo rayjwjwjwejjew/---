@@ -80,7 +80,10 @@ const CREDITS_BLOCKS = [
 
 const TITLE_SCREEN_BG = "https://i.imgur.com/FAWl3AP.png";
 const CORNER_IMG_URL = "https://i.imgur.com/NVGVJiU.png";
-const IMAGE_PRELOAD_CACHE = new Set<string>();
+const IMAGE_READY_CACHE = new Map<string, Promise<void>>();
+const IMAGE_PREFETCH_QUEUE: string[] = [];
+const IMAGE_PREFETCH_LIMIT = 3;
+let IMAGE_PREFETCH_ACTIVE = 0;
 
 const QA_ITEMS = [
   { q: "1、为什么做这个？", a: "m成分占比太高" },
@@ -118,13 +121,53 @@ function getCodeFenceLanguage(path: string): string {
   return "text";
 }
 
+function ensureImageReady(url: string): Promise<void> {
+  const cached = IMAGE_READY_CACHE.get(url);
+  if (cached) return cached;
+
+  const promise = new Promise<void>((resolve) => {
+    const img = new Image();
+    img.decoding = "async";
+    img.loading = "eager";
+    const finish = () => {
+      if (typeof img.decode === "function") {
+        void img.decode().catch(() => undefined).finally(resolve);
+        return;
+      }
+      resolve();
+    };
+    img.onload = finish;
+    img.onerror = () => resolve();
+    img.src = url;
+    if (img.complete && img.naturalWidth > 0) {
+      finish();
+    }
+  });
+
+  IMAGE_READY_CACHE.set(url, promise);
+  return promise;
+}
+
+function pumpImagePreloadQueue() {
+  while (IMAGE_PREFETCH_ACTIVE < IMAGE_PREFETCH_LIMIT && IMAGE_PREFETCH_QUEUE.length > 0) {
+    const url = IMAGE_PREFETCH_QUEUE.shift();
+    if (!url || IMAGE_READY_CACHE.has(url)) continue;
+    IMAGE_PREFETCH_ACTIVE += 1;
+    void ensureImageReady(url).finally(() => {
+      IMAGE_PREFETCH_ACTIVE = Math.max(0, IMAGE_PREFETCH_ACTIVE - 1);
+      pumpImagePreloadQueue();
+    });
+  }
+}
+
 function preloadImage(url: string | null | undefined) {
-  if (!url || IMAGE_PRELOAD_CACHE.has(url)) return;
-  const img = new Image();
-  img.decoding = "async";
-  img.loading = "eager";
-  img.src = url;
-  IMAGE_PRELOAD_CACHE.add(url);
+  if (!url || IMAGE_READY_CACHE.has(url) || IMAGE_PREFETCH_QUEUE.includes(url)) return;
+  IMAGE_PREFETCH_QUEUE.push(url);
+  pumpImagePreloadQueue();
+}
+
+function queueImagePreload(url: string | null | undefined) {
+  preloadImage(url);
 }
 
 function resolveBackgroundUrl(lineIndex: number): string {
@@ -497,8 +540,8 @@ export function App() {
   }, [refreshBgmList]);
 
   useEffect(() => {
-    preloadImage(TITLE_SCREEN_BG);
-    preloadImage(CORNER_IMG_URL);
+    queueImagePreload(TITLE_SCREEN_BG);
+    queueImagePreload(CORNER_IMG_URL);
   }, []);
 
   useEffect(() => {
@@ -506,8 +549,13 @@ export function App() {
     const upcoming = new Set<string>();
     for (let i = index; i < Math.min(SCRIPT.lines.length, index + 8); i += 1) {
       upcoming.add(resolveBackgroundUrl(i));
+      const line = SCRIPT.lines[i];
+      if (!line) continue;
+      getSceneCharacters(SCRIPT.lines, i, line.speaker).forEach((ch) => {
+        upcoming.add(ch.spriteUrl);
+      });
     }
-    upcoming.forEach((url) => preloadImage(url));
+    upcoming.forEach((url) => queueImagePreload(url));
   }, [index, phase]);
 
   useEffect(() => {
@@ -522,31 +570,41 @@ export function App() {
     }
 
     if (nextBg !== lastBgRef.current) {
-      if (lowPerfMode) {
+      let cancelled = false;
+      let clearTimer: number | null = null;
+      const nextTransition = curLine.transition || "dissolve";
+      const currentBg = bgUrl || lastBgRef.current || DEFAULT_BG;
+
+      if (!lowPerfMode) {
+        setPrevBgUrl(currentBg);
+        setTransitionType(nextTransition);
+        setTransitionActive(true);
+      } else {
         setPrevBgUrl("");
         setTransitionActive(false);
-        setBgUrl(nextBg);
-        lastBgRef.current = nextBg;
-        return;
       }
-      const nextTransition = curLine.transition || "dissolve";
-      setPrevBgUrl(lastBgRef.current);
-      setTransitionType(nextTransition);
-      setTransitionActive(true);
-      const bgTimer = window.setTimeout(() => {
-        setBgUrl(nextBg);
-        lastBgRef.current = nextBg;
-      }, nextTransition === "dissolve" ? 80 : 260);
-      const clearTimer = window.setTimeout(() => {
-        setTransitionActive(false);
-      }, nextTransition === "dissolve" ? 900 : 1050);
+
+      void ensureImageReady(nextBg)
+        .catch(() => undefined)
+        .then(() => {
+          if (cancelled) return;
+          setBgUrl(nextBg);
+          lastBgRef.current = nextBg;
+          if (lowPerfMode) return;
+          clearTimer = window.setTimeout(() => {
+            if (!cancelled) {
+              setTransitionActive(false);
+            }
+          }, nextTransition === "dissolve" ? 520 : 700);
+        });
+
       return () => {
-        window.clearTimeout(bgTimer);
-        window.clearTimeout(clearTimer);
+        cancelled = true;
+        if (clearTimer) window.clearTimeout(clearTimer);
       };
     }
     return undefined;
-  }, [curLine, index, lowPerfMode, phase]);
+  }, [bgUrl, curLine, index, lowPerfMode, phase]);
 
   const triggerEffect = useCallback((effectName: string) => {
     if (!effectName || effectName === "none") return;
@@ -570,13 +628,30 @@ export function App() {
   useEffect(() => {
     if (phase !== "playing" || !curLine?.cg) return;
     setCgTitle(curLine.cg);
-    setCgImageUrl(getSceneBg(curLine.scene) || bgUrl || DEFAULT_BG);
-    setCgVisible(true);
+    let cancelled = false;
+    const cgUrl = getSceneBg(curLine.scene) || bgUrl || DEFAULT_BG;
+    void ensureImageReady(cgUrl).then(() => {
+      if (cancelled) return;
+      setCgImageUrl(cgUrl);
+      setCgVisible(true);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [bgUrl, curLine, phase]);
 
   useEffect(() => {
     if (phase !== "playing" || !curLine) return;
     setStageChars(getSceneCharacters(SCRIPT.lines, index, curLine.speaker));
+    const upcoming = new Set<string>();
+    for (let i = index; i < Math.min(SCRIPT.lines.length, index + 6); i += 1) {
+      const line = SCRIPT.lines[i];
+      if (!line) continue;
+      getSceneCharacters(SCRIPT.lines, i, line.speaker).forEach((ch) => {
+        upcoming.add(ch.spriteUrl);
+      });
+    }
+    upcoming.forEach((url) => queueImagePreload(url));
   }, [curLine, index, phase]);
 
   const crossfadeBgm = useCallback(
