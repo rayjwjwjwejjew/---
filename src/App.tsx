@@ -30,6 +30,7 @@ const KEY_SETTINGS = "vn_settings_v1";
 const KEY_MANIFEST = "vn_manifest_v1";
 const KEY_SAVE = "vn_save_v1";
 const KEY_SAVE_SLOTS = "vn_save_slots_v1";
+const KEY_SCENE_BG_OVERRIDES = "vn_scene_bg_overrides_v1";
 const SAVE_SLOT_COUNT = 8;
 
 const DEFAULT_SETTINGS = {
@@ -72,6 +73,7 @@ type SaveSlot = {
   savedAt: string;
   progress: string;
 };
+type SceneBgOverride = { source: "asset" | "url"; value: string; label: string };
 type SfxLayer = "ui" | "scene" | "story" | "cg" | "emotion";
 
 const PAUSE_CHARS: Record<string, number> = {
@@ -156,13 +158,31 @@ function findBestAssetMatch(items: AssetEntry[] | undefined, queries: string[]) 
   );
 }
 
+function collectScriptScenes() {
+  return Array.from(
+    new Set(
+      SCRIPT.lines
+        .map((line) => line.scene?.trim())
+        .filter((scene): scene is string => Boolean(scene)),
+    ),
+  );
+}
+
 function readSaveSlots(): Array<SaveSlot | null> {
   const slots = safeParse<Array<SaveSlot | null>>(localStorage.getItem(KEY_SAVE_SLOTS), []);
   return Array.from({ length: SAVE_SLOT_COUNT }, (_, idx) => slots[idx] || null);
 }
 
+function readSceneBgOverrides(): Record<string, SceneBgOverride> {
+  return safeParse<Record<string, SceneBgOverride>>(localStorage.getItem(KEY_SCENE_BG_OVERRIDES), {});
+}
+
 function writeSaveSlots(slots: Array<SaveSlot | null>) {
   localStorage.setItem(KEY_SAVE_SLOTS, JSON.stringify(slots.slice(0, SAVE_SLOT_COUNT)));
+}
+
+function writeSceneBgOverrides(overrides: Record<string, SceneBgOverride>) {
+  localStorage.setItem(KEY_SCENE_BG_OVERRIDES, JSON.stringify(overrides));
 }
 
 function buildSaveSnapshot(index: number, log: LogItem[], currentAct: string, currentBgmName: string): SaveSlot {
@@ -275,14 +295,6 @@ function preloadImage(url: string | null | undefined) {
 
 function queueImagePreload(url: string | null | undefined) {
   preloadImage(url);
-}
-
-function resolveBackgroundUrl(lineIndex: number): string {
-  const line = SCRIPT.lines[lineIndex];
-  if (!line) return DEFAULT_BG;
-  const special = getSpecialBg(lineIndex);
-  if (special) return special;
-  return getSceneBg(line.scene) || DEFAULT_BG;
 }
 
 const RainCanvas = memo(function RainCanvas({
@@ -570,6 +582,11 @@ export function App() {
   const [assetQuery, setAssetQuery] = useState("");
   const [assetFilter, setAssetFilter] = useState<keyof Manifest | "all">("all");
   const [manifestState, setManifestState] = useState<Manifest>(() => normalizeManifest(safeParse<Manifest>(localStorage.getItem(KEY_MANIFEST), {})));
+  const [sceneBgOverrides, setSceneBgOverrides] = useState<Record<string, SceneBgOverride>>(() => readSceneBgOverrides());
+  const [sceneQuery, setSceneQuery] = useState("");
+  const [selectedSceneName, setSelectedSceneName] = useState("");
+  const [selectedBackgroundAssetId, setSelectedBackgroundAssetId] = useState("");
+  const [customSceneBgUrl, setCustomSceneBgUrl] = useState("");
   const [openingPreludeVisible, setOpeningPreludeVisible] = useState(false);
   const [openingPreludeText, setOpeningPreludeText] = useState("第一幕 · 正在展开");
 
@@ -586,6 +603,7 @@ export function App() {
   const sfxUrlRef = useRef("");
   const cgVideoUrlRef = useRef("");
   const cgVideoRef = useRef<HTMLVideoElement>(null);
+  const bgAssetUrlCacheRef = useRef<Record<string, string>>({});
   const audioCtxRef = useRef<AudioContext | null>(null);
   const cgCloseTimerRef = useRef<number | null>(null);
   const preludeTimerRef = useRef<number | null>(null);
@@ -741,6 +759,23 @@ export function App() {
   }, []);
 
   useEffect(() => {
+    if (!selectedSceneName) {
+      const initialScene = curLine?.scene || collectScriptScenes()[0] || "";
+      setSelectedSceneName(initialScene);
+      const initialOverride = sceneBgOverrides[initialScene];
+      setCustomSceneBgUrl(initialOverride?.source === "url" ? initialOverride.value : "");
+      setSelectedBackgroundAssetId(initialOverride?.source === "asset" ? initialOverride.value : "");
+    }
+  }, [curLine?.scene, sceneBgOverrides, selectedSceneName]);
+
+  useEffect(() => {
+    if (!selectedSceneName) return;
+    const override = sceneBgOverrides[selectedSceneName];
+    setCustomSceneBgUrl(override?.source === "url" ? override.value : "");
+    setSelectedBackgroundAssetId(override?.source === "asset" ? override.value : "");
+  }, [sceneBgOverrides, selectedSceneName]);
+
+  useEffect(() => {
     queueImagePreload(TITLE_SCREEN_BG);
     queueImagePreload(CORNER_IMG_URL);
   }, []);
@@ -749,7 +784,7 @@ export function App() {
     if (phase !== "playing") return;
     const upcoming = new Set<string>();
     for (let i = index; i < Math.min(SCRIPT.lines.length, index + 8); i += 1) {
-      upcoming.add(resolveBackgroundUrl(i));
+      upcoming.add(resolveSceneBackground(SCRIPT.lines[i]?.scene));
       const line = SCRIPT.lines[i];
       if (!line) continue;
       getSceneCharacters(SCRIPT.lines, i, line.speaker).forEach((ch) => {
@@ -762,18 +797,22 @@ export function App() {
         setSpriteReadyMap((prev) => (prev[url] ? prev : { ...prev, [url]: true }));
       });
     });
-  }, [index, phase]);
+  }, [index, phase, resolveSceneBackground]);
 
   useEffect(() => {
     if (phase !== "playing" || !curLine) return;
-    let nextBg = DEFAULT_BG;
+    let nextBg = resolveSceneBackground(curLine.scene);
     const special = getSpecialBg(index);
     if (special) {
       nextBg = special;
-    } else {
-      const sceneBg = getSceneBg(curLine.scene);
-      if (sceneBg) nextBg = sceneBg;
     }
+
+    const override = curLine.scene ? sceneBgOverrides[curLine.scene] : undefined;
+    const loadAssetBg = async () => {
+      if (override?.source !== "asset") return nextBg;
+      const url = await ensureBackgroundAssetUrl(override.value);
+      return url || nextBg;
+    };
 
     if (nextBg !== lastBgRef.current) {
       let cancelled = false;
@@ -791,12 +830,13 @@ export function App() {
       }
       pulseUi("scene");
 
-      void ensureImageReady(nextBg)
-        .catch(() => undefined)
-        .then(() => {
+      void loadAssetBg()
+        .then((resolvedBg) => ensureImageReady(resolvedBg).then(() => resolvedBg))
+        .catch(() => nextBg)
+        .then((resolvedBg) => {
           if (cancelled) return;
-          setBgUrl(nextBg);
-          lastBgRef.current = nextBg;
+          setBgUrl(resolvedBg);
+          lastBgRef.current = resolvedBg;
           if (lowPerfMode) return;
           clearTimer = window.setTimeout(() => {
             if (!cancelled) {
@@ -811,7 +851,7 @@ export function App() {
       };
     }
     return undefined;
-  }, [bgUrl, curLine, index, lowPerfMode, phase]);
+  }, [bgUrl, curLine, ensureBackgroundAssetUrl, index, lowPerfMode, phase, pulseUi, resolveSceneBackground, sceneBgOverrides]);
 
   const triggerEffect = useCallback((effectName: string) => {
     if (!effectName || effectName === "none") return;
@@ -842,7 +882,7 @@ export function App() {
     const cgKey = `${index}:${curLine.cg}`;
     if (cgSeenRef.current === cgKey) return;
     let cancelled = false;
-    const posterUrl = getSceneBg(curLine.scene) || bgUrl || DEFAULT_BG;
+    const posterUrl = resolveSceneBackground(curLine.scene) || bgUrl || DEFAULT_BG;
     pulseUi("cg");
     const openCgWithPoster = () => {
       void ensureImageReady(posterUrl).then(() => {
@@ -1539,6 +1579,7 @@ export function App() {
       if (bgmUrlRef.current) URL.revokeObjectURL(bgmUrlRef.current);
       if (sfxUrlRef.current) URL.revokeObjectURL(sfxUrlRef.current);
       if (cgVideoUrlRef.current) URL.revokeObjectURL(cgVideoUrlRef.current);
+      Object.values(bgAssetUrlCacheRef.current).forEach((url) => URL.revokeObjectURL(url));
       if (cgCloseTimerRef.current) window.clearTimeout(cgCloseTimerRef.current);
       if (preludeTimerRef.current) window.clearTimeout(preludeTimerRef.current);
       if (uiPulseRef.current) window.clearTimeout(uiPulseRef.current);
@@ -1577,10 +1618,102 @@ export function App() {
     const matchesQuery = !q || item.label.toLowerCase().includes(q) || item.id.toLowerCase().includes(q);
     return matchesKind && matchesQuery;
   });
+  const backgroundAssetEntries = manifestState.backgrounds || [];
   const debugMarkers = SCRIPT.lines
     .map((line, idx) => ({ line, idx }))
     .filter(({ line }) => line.kind === "title" || line.kind === "label" || line.cg)
     .slice(0, 48);
+  const sceneOptions = collectScriptScenes();
+  const filteredScenes = sceneOptions.filter((scene) => {
+    const q = sceneQuery.trim().toLowerCase();
+    return !q || scene.toLowerCase().includes(q);
+  });
+  const resolveSceneBackground = useCallback(
+    (scene: string | undefined) => {
+      if (!scene) return DEFAULT_BG;
+      const override = sceneBgOverrides[scene];
+      if (override?.source === "url" && override.value) return override.value;
+      if (override?.source === "asset" && bgAssetUrlCacheRef.current[override.value]) {
+        return bgAssetUrlCacheRef.current[override.value];
+      }
+      return getSceneBg(scene) || DEFAULT_BG;
+    },
+    [sceneBgOverrides],
+  );
+
+  const ensureBackgroundAssetUrl = useCallback(async (assetId: string) => {
+    const cached = bgAssetUrlCacheRef.current[assetId];
+    if (cached) return cached;
+    const blob = await AssetDB.get<Blob>(AssetDB.STORE_ASSETS, assetId);
+    if (!blob) return "";
+    const url = URL.createObjectURL(blob);
+    bgAssetUrlCacheRef.current[assetId] = url;
+    return url;
+  }, []);
+
+  const getBackgroundAssetLabel = useCallback(
+    (assetId: string) => {
+      return (
+        manifestState.backgrounds?.find((item) => item.id === assetId)?.label ||
+        manifestState.bg?.find((item) => item.id === assetId)?.label ||
+        assetId
+      );
+    },
+    [manifestState.backgrounds, manifestState.bg],
+  );
+
+  const applySceneBackground = useCallback(
+    async (scene: string, assetId: string | null) => {
+      const nextOverrides = { ...sceneBgOverrides };
+      if (!assetId) {
+        delete nextOverrides[scene];
+        setSceneBgOverrides(nextOverrides);
+        writeSceneBgOverrides(nextOverrides);
+        return;
+      }
+      nextOverrides[scene] = { source: "asset", value: assetId, label: getBackgroundAssetLabel(assetId) };
+      setSceneBgOverrides(nextOverrides);
+      writeSceneBgOverrides(nextOverrides);
+      if (scene === curLine?.scene) {
+        const url = await ensureBackgroundAssetUrl(assetId);
+        if (url) {
+          setBgUrl(url);
+          lastBgRef.current = url;
+          pulseUi("scene");
+        }
+      }
+    },
+    [curLine?.scene, ensureBackgroundAssetUrl, getBackgroundAssetLabel, pulseUi, sceneBgOverrides],
+  );
+
+  const previewSceneBackground = useCallback(
+    async (scene: string, assetId?: string | null) => {
+      const override = sceneBgOverrides[scene];
+      if (assetId) {
+        const url = await ensureBackgroundAssetUrl(assetId);
+        if (url) {
+          setBgUrl(url);
+          lastBgRef.current = url;
+          pulseUi("scene");
+        }
+        return;
+      }
+      if (override?.source === "asset") {
+        const url = await ensureBackgroundAssetUrl(override.value);
+        if (url) {
+          setBgUrl(url);
+          lastBgRef.current = url;
+          pulseUi("scene");
+        }
+        return;
+      }
+      const builtIn = getSceneBg(scene) || DEFAULT_BG;
+      setBgUrl(builtIn);
+      lastBgRef.current = builtIn;
+      pulseUi("scene");
+    },
+    [ensureBackgroundAssetUrl, pulseUi, sceneBgOverrides],
+  );
 
   const settingsPanelContent = (
     <>
@@ -1652,6 +1785,94 @@ export function App() {
         </div>
         <div className="tiny">资源会保存在浏览器本地（IndexedDB）。</div>
         <div className="tiny" style={{ marginTop: 6 }}>TXT 导出会按原始路径完整输出源码；PDF 导出已移除。</div>
+      </div>
+      <div className="card">
+        <div className="panel-title">场景选择器</div>
+        <div className="row">
+          <span className="label">场景搜索</span>
+          <input value={sceneQuery} onChange={(e) => setSceneQuery(e.target.value)} placeholder="输入场景名" />
+        </div>
+        <div className="row">
+          <span className="label">目标场景</span>
+          <select value={selectedSceneName} onChange={(e) => setSelectedSceneName(e.target.value)}>
+            <option value="">-- 选择场景 --</option>
+            {filteredScenes.slice(0, 80).map((scene) => (
+              <option key={scene} value={scene}>
+                {scene}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="row">
+          <span className="label">背景资源</span>
+          <select value={selectedBackgroundAssetId} onChange={(e) => setSelectedBackgroundAssetId(e.target.value)}>
+            <option value="">-- 选择上传背景 --</option>
+            {backgroundAssetEntries.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="row">
+          <span className="label">自定义 URL</span>
+          <input value={customSceneBgUrl} onChange={(e) => setCustomSceneBgUrl(e.target.value)} placeholder="https://..." />
+        </div>
+        <div className="row">
+          <button
+            className="btn"
+            disabled={!selectedSceneName}
+            onClick={() => {
+              void previewSceneBackground(selectedSceneName);
+            }}
+          >
+            预览默认背景
+          </button>
+          <button
+            className="btn"
+            disabled={!selectedSceneName || !selectedBackgroundAssetId}
+            onClick={() => {
+              void applySceneBackground(selectedSceneName, selectedBackgroundAssetId || null);
+            }}
+          >
+            绑定上传背景
+          </button>
+          <button
+            className="btn"
+            disabled={!selectedSceneName || !customSceneBgUrl.trim()}
+            onClick={() => {
+              const nextOverrides = {
+                ...sceneBgOverrides,
+                [selectedSceneName]: { source: "url", value: customSceneBgUrl.trim(), label: customSceneBgUrl.trim() },
+              };
+              setSceneBgOverrides(nextOverrides);
+              writeSceneBgOverrides(nextOverrides);
+              setBgUrl(customSceneBgUrl.trim());
+              lastBgRef.current = customSceneBgUrl.trim();
+              pulseUi("scene");
+            }}
+          >
+            绑定 URL
+          </button>
+          <button
+            className="btn"
+            disabled={!selectedSceneName}
+            onClick={() => {
+              void applySceneBackground(selectedSceneName, null);
+              setCustomSceneBgUrl("");
+              setSelectedBackgroundAssetId("");
+            }}
+          >
+            清除绑定
+          </button>
+        </div>
+        <div className="tiny">
+          当前绑定：
+          {selectedSceneName && sceneBgOverrides[selectedSceneName]
+            ? `${sceneBgOverrides[selectedSceneName].source === "asset" ? "资源" : "URL"} · ${sceneBgOverrides[selectedSceneName].label}`
+            : "未绑定"}
+        </div>
+        <div className="tiny">选场景后，可以把上传背景或自定义 URL 绑定到对应剧情段，再一键预览。 </div>
       </div>
       <div className="card">
         <div className="row">
@@ -1824,7 +2045,7 @@ export function App() {
           <button
             className="btn"
             onClick={() => {
-              const nextBg = bgUrl === TITLE_SCREEN_BG ? resolveBackgroundUrl(index) : TITLE_SCREEN_BG;
+              const nextBg = bgUrl === TITLE_SCREEN_BG ? resolveSceneBackground(curLine?.scene) : TITLE_SCREEN_BG;
               setBgUrl(nextBg);
               lastBgRef.current = nextBg;
               pulseUi("scene");
