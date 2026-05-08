@@ -424,6 +424,8 @@ export function useVnRuntime() {
   const [openQaIndex, setOpenQaIndex] = useState<number | null>(null);
   const [saveSlots, setSaveSlots] = useState<Array<SaveSlot | null>>(() => readSaveSlots(SAVE_SLOT_COUNT));
   const [selectedSaveSlot, setSelectedSaveSlot] = useState(0);
+  const [workspaceMode, setWorkspaceMode] = useState<"player" | "editor">("player");
+  const isEditorMode = workspaceMode === "editor";
   const [assetQuery, setAssetQuery] = useState("");
   const [assetFilter, setAssetFilter] = useState<keyof Manifest | "all">("all");
   const [resourcePage, setResourcePage] = useState(0);
@@ -748,6 +750,12 @@ export function useVnRuntime() {
     setCustomSceneBgUrl(override?.source === "url" ? override.value : "");
     setSelectedBackgroundAssetId(override?.source === "asset" ? override.value : "");
   }, [sceneBgOverrides, selectedSceneName]);
+
+  useEffect(() => {
+    if (!isEditorMode && (activePanel === "assets" || activePanel === "debug")) {
+      setActivePanel(null);
+    }
+  }, [activePanel, isEditorMode]);
 
   useEffect(() => {
     queueImagePreload(TITLE_SCREEN_BG);
@@ -1385,6 +1393,7 @@ export function useVnRuntime() {
   }, [bgmMuted]);
 
   const togglePanel = (name: string) => {
+    if (!isEditorMode && (name === "assets" || name === "debug")) return;
     pulseUi("ui");
     setActivePanel((prev) => (prev === name ? null : name));
   };
@@ -1585,8 +1594,8 @@ export function useVnRuntime() {
   const bgmMoodClass = useMemo(() => getBgmMoodClass(currentBgmLabel), [currentBgmLabel]);
   const sceneProgress = useMemo(() => getSceneProgress(index, SCRIPT.lines.length), [index]);
   const titlePanelOpen = useMemo(
-    () => phase === "title" && (activePanel === "settings" || activePanel === "assets"),
-    [activePanel, phase],
+    () => phase === "title" && (activePanel === "settings" || (isEditorMode && activePanel === "assets")),
+    [activePanel, isEditorMode, phase],
   );
   const hasContinueSave = Boolean(localStorage.getItem(STORAGE_KEYS.save));
   const resourceEntries = useMemo(
@@ -1617,7 +1626,6 @@ export function useVnRuntime() {
     () => filterSceneNames(SCRIPT_SCENES, sceneQuery),
     [sceneQuery],
   );
-
   useEffect(() => {
     if (resourcePage >= resourcePageCount) {
       setResourcePage(Math.max(0, resourcePageCount - 1));
@@ -1706,9 +1714,15 @@ export function useVnRuntime() {
                 <span className="title-btn-icon">⚙</span>
                 <span>设置</span>
               </button>
-              <button className="title-btn" onClick={() => setActivePanel("assets")}>
-                <span className="title-btn-icon">♫</span>
-                <span>资源管理</span>
+              {workspaceMode === "editor" && (
+                <button className="title-btn" onClick={() => setActivePanel("assets")}>
+                  <span className="title-btn-icon">♫</span>
+                  <span>资源管理</span>
+                </button>
+              )}
+              <button className="title-btn" onClick={() => setWorkspaceMode((value) => (value === "editor" ? "player" : "editor"))}>
+                <span className="title-btn-icon">{workspaceMode === "editor" ? "✦" : "✎"}</span>
+                <span>{workspaceMode === "editor" ? "玩家模式" : "编辑器模式"}</span>
               </button>
             </div>
             <div className="title-footer">
@@ -2072,8 +2086,13 @@ export function useVnRuntime() {
             <button className="pbtn" onClick={() => togglePanel("save")}>
               存档槽
             </button>
-            <button className="pbtn" onClick={() => togglePanel("debug")}>
-              调试
+            {isEditorMode && (
+              <button className="pbtn" onClick={() => togglePanel("debug")}>
+                调试
+              </button>
+            )}
+            <button className="pbtn" onClick={() => setWorkspaceMode((value) => (value === "editor" ? "player" : "editor"))}>
+              {isEditorMode ? "玩家模式" : "编辑器"}
             </button>
             <button className="pbtn" onClick={() => { setPhase("title"); setAuto(false); setSkip(false); }}>
               标题
@@ -2088,7 +2107,8 @@ export function useVnRuntime() {
             )}
           </div>
 
-          <div className={`panel ${activePanel === "assets" ? "show" : ""}`}>
+          {isEditorMode && (
+            <div className={`panel ${activePanel === "assets" ? "show" : ""}`}>
             <AssetsPanel
               onUploadAsset={uploadAsset}
               sceneQuery={sceneQuery}
@@ -2128,7 +2148,8 @@ export function useVnRuntime() {
               resourceCount={filteredResources.length}
               onResourcePageChange={setResourcePage}
             />
-          </div>
+            </div>
+          )}
 
           <div className={`panel ${activePanel === "save" ? "show" : ""}`}>
             <SavePanel
@@ -2145,7 +2166,8 @@ export function useVnRuntime() {
             />
           </div>
 
-          <div className={`panel ${activePanel === "debug" ? "show" : ""}`}>
+          {isEditorMode && (
+            <div className={`panel ${activePanel === "debug" ? "show" : ""}`}>
             <DebugPanel
               debugMarkers={debugMarkers}
               onJumpStart={() => {
@@ -2199,7 +2221,8 @@ export function useVnRuntime() {
               debugCount={debugMarkers.length}
               onDebugPageChange={setDebugPage}
             />
-          </div>
+            </div>
+          )}
 
           <div className={`panel ${activePanel === "settings" ? "show" : ""}`}>
             <SettingsPanel settings={settings} onChange={setSettings} onReset={() => setSettings(DEFAULT_SETTINGS)} />
