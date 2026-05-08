@@ -28,7 +28,7 @@ import {
   writeSceneBgOverrides,
 } from "./vnCore";
 import { ensureImageReady, queueImagePreload } from "./vnMedia";
-import { AssetsPanel, SavePanel, SettingsPanel, type ResourceEntry } from "./vnPanels";
+import { AssetsPanel, BgmPanel, SavePanel, SettingsPanel, type ResourceEntry } from "./vnPanels";
 import appSource from "./App.tsx?raw";
 import mainSource from "./main.tsx?raw";
 import engineSource from "./engine.ts?raw";
@@ -2254,55 +2254,20 @@ export function App() {
           </div>
 
           <div className={`panel ${activePanel === "bgm" ? "show" : ""}`}>
-            <div className="card">
-              <div className="panel-title">BGM 控制</div>
-              <div className="bgm-controls-row">
-                <button className={`bgm-ctrl-btn ${bgmPlaying ? "active" : ""}`} onClick={toggleBgm}>
-                  {bgmPlaying ? "⏸ 暂停" : "▶ 播放"}
-                </button>
-                <button className="bgm-ctrl-btn" onClick={stopBgm}>
-                  ⏹ 停止
-                </button>
-                <button className={`bgm-ctrl-btn ${bgmMuted ? "muted" : ""}`} onClick={toggleMute}>
-                  {bgmMuted ? "🔇 静音中" : "🔊 有声"}
-                </button>
-              </div>
-              <div className="bgm-now-playing">
-                {currentBgmLabel ? <span>正在播放：<strong>{currentBgmLabel}</strong></span> : <span className="bgm-no-music">未选择BGM</span>}
-              </div>
-            </div>
-            <div className="card">
-              <div className="panel-title">选择BGM</div>
-              <div className="row">
-                <select className="bgm-panel-select" value={currentBgmId} onChange={(e) => void loadAndPlayBgm(e.target.value)}>
-                  <option value="">-- 无 --</option>
-                  {bgmList.map((item) => (
-                    <option key={item.id} value={item.id}>
-                      {item.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className="tiny">先在“资源”面板上传BGM文件，然后在这里选择播放。</div>
-            </div>
-            <div className="card">
-              <div className="panel-title">音量</div>
-              <div className="row">
-                <span className="label">BGM音量</span>
-                <input type="range" min="0" max="100" value={settings.bgmVol} onChange={(e) => setSettings((s) => ({ ...s, bgmVol: Number(e.target.value) }))} />
-                <span className="tiny mono">{settings.bgmVol}%</span>
-              </div>
-              <div className="row">
-                <span className="label">音效音量</span>
-                <input type="range" min="0" max="100" value={settings.sfxVol} onChange={(e) => setSettings((s) => ({ ...s, sfxVol: Number(e.target.value) }))} />
-                <span className="tiny mono">{settings.sfxVol}%</span>
-              </div>
-            </div>
-            <div className="card">
-              <div className="panel-title">音效资源</div>
-              <div className="tiny">已上传音效：{sfxList.length}</div>
-              <div className="tiny" style={{ marginTop: 4 }}>建议文件名包含脚本关键词，比如“心跳声加速”“滑倒声”“敲门声”。</div>
-            </div>
+            <BgmPanel
+              bgmPlaying={bgmPlaying}
+              bgmMuted={bgmMuted}
+              currentBgmLabel={currentBgmLabel}
+              currentBgmId={currentBgmId}
+              bgmList={bgmList}
+              bgmVol={settings.bgmVol}
+              sfxVol={settings.sfxVol}
+              onToggleBgm={toggleBgm}
+              onStopBgm={stopBgm}
+              onToggleMute={toggleMute}
+              onLoadAndPlayBgm={(id) => void loadAndPlayBgm(id)}
+              onSettingsChange={setSettings}
+            />
           </div>
 
           <div id="hud" style={{ display: curLine ? "block" : "none" }}>

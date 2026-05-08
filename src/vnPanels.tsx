@@ -50,6 +50,21 @@ type SavePanelProps = {
   getSavedAtLabel: (savedAt: string) => string;
 };
 
+type BgmPanelProps = {
+  bgmPlaying: boolean;
+  bgmMuted: boolean;
+  currentBgmLabel: string;
+  currentBgmId: string;
+  bgmList: { id: string; label: string }[];
+  bgmVol: number;
+  sfxVol: number;
+  onToggleBgm: () => void;
+  onStopBgm: () => void;
+  onToggleMute: () => void;
+  onLoadAndPlayBgm: (id: string) => void;
+  onSettingsChange: (updater: (value: Settings) => Settings) => void;
+};
+
 export function SettingsPanel({ settings, onChange, onReset }: SettingsPanelProps) {
   return (
     <div className="card">
@@ -270,6 +285,70 @@ export function SavePanel({
             </div>
           </div>
         ))}
+      </div>
+    </>
+  );
+}
+
+export function BgmPanel({
+  bgmPlaying,
+  bgmMuted,
+  currentBgmLabel,
+  currentBgmId,
+  bgmList,
+  bgmVol,
+  sfxVol,
+  onToggleBgm,
+  onStopBgm,
+  onToggleMute,
+  onLoadAndPlayBgm,
+  onSettingsChange,
+}: BgmPanelProps) {
+  return (
+    <>
+      <div className="card">
+        <div className="panel-title">BGM 控制</div>
+        <div className="bgm-controls-row">
+          <button className={`bgm-ctrl-btn ${bgmPlaying ? "active" : ""}`} onClick={onToggleBgm}>
+            {bgmPlaying ? "⏸ 暂停" : "▶ 播放"}
+          </button>
+          <button className="bgm-ctrl-btn" onClick={onStopBgm}>
+            ⏹ 停止
+          </button>
+          <button className={`bgm-ctrl-btn ${bgmMuted ? "muted" : ""}`} onClick={onToggleMute}>
+            {bgmMuted ? "🔇 静音中" : "🔊 有声"}
+          </button>
+        </div>
+        <div className="bgm-now-playing">
+          {currentBgmLabel ? <span>正在播放：<strong>{currentBgmLabel}</strong></span> : <span className="bgm-no-music">未选择BGM</span>}
+        </div>
+      </div>
+      <div className="card">
+        <div className="panel-title">选择BGM</div>
+        <div className="row">
+          <select className="bgm-panel-select" value={currentBgmId} onChange={(e) => onLoadAndPlayBgm(e.target.value)}>
+            <option value="">-- 无 --</option>
+            {bgmList.map((item) => (
+              <option key={item.id} value={item.id}>
+                {item.label}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="tiny">先在“资源”面板上传BGM文件，然后在这里选择播放。</div>
+      </div>
+      <div className="card">
+        <div className="panel-title">音量</div>
+        <div className="row">
+          <span className="label">BGM音量</span>
+          <input type="range" min="0" max="100" value={bgmVol} onChange={(e) => onSettingsChange((s) => ({ ...s, bgmVol: Number(e.target.value) }))} />
+          <span className="tiny mono">{bgmVol}%</span>
+        </div>
+        <div className="row">
+          <span className="label">音效音量</span>
+          <input type="range" min="0" max="100" value={sfxVol} onChange={(e) => onSettingsChange((s) => ({ ...s, sfxVol: Number(e.target.value) }))} />
+          <span className="tiny mono">{sfxVol}%</span>
+        </div>
       </div>
     </>
   );
