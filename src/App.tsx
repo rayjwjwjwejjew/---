@@ -31,9 +31,11 @@ import { ensureImageReady, queueImagePreload } from "./vnMedia";
 import { AssetsPanel, BgmPanel, DebugPanel, SavePanel, SettingsPanel } from "./vnPanels";
 import {
   buildDebugMarkers,
+  collectScriptScenes,
   buildResourceEntries,
   filterResourceEntries,
   filterSceneNames,
+  findBestAssetMatch,
   getBgmMoodClass,
   getCurrentBgmLabel,
   getSceneProgress,
@@ -107,26 +109,7 @@ function safeParse<T>(raw: string | null, fallback: T): T {
   }
 }
 
-function findBestAssetMatch(items: AssetEntry[] | undefined, queries: string[]) {
-  if (!items || items.length === 0) return undefined;
-  const loweredQueries = queries.map((query) => query.toLowerCase()).filter(Boolean);
-  return (
-    items.find((item) => loweredQueries.some((query) => item.label.toLowerCase().includes(query) || item.id.toLowerCase().includes(query))) ||
-    items[0]
-  );
-}
-
-function collectScriptScenes() {
-  return Array.from(
-    new Set(
-      SCRIPT.lines
-        .map((line) => line.scene?.trim())
-        .filter((scene): scene is string => Boolean(scene)),
-    ),
-  );
-}
-
-const SCRIPT_SCENES = collectScriptScenes();
+const SCRIPT_SCENES = collectScriptScenes(SCRIPT.lines);
 
 function getLineTypingDelay(text: string, index: number, baseMs: number) {
   const char = text[index - 1] || "";
@@ -443,6 +426,8 @@ export function useVnRuntime() {
   const [selectedSaveSlot, setSelectedSaveSlot] = useState(0);
   const [assetQuery, setAssetQuery] = useState("");
   const [assetFilter, setAssetFilter] = useState<keyof Manifest | "all">("all");
+  const [resourcePage, setResourcePage] = useState(0);
+  const [debugPage, setDebugPage] = useState(0);
   const [manifestState, setManifestState] = useState<Manifest>(() =>
     normalizeManifest(readJson<Manifest>(STORAGE_KEYS.manifest, {})),
   );
@@ -890,7 +875,7 @@ export function useVnRuntime() {
       });
     };
 
-    const videoMatch = findBestAssetMatch(manifestState.video, [curLine.cg, curLine.scene || "", "cg", "视频"]);
+  const videoMatch = findBestAssetMatch(manifestState.video, [curLine.cg, curLine.scene || "", "cg", "视频"]);
     if (videoMatch) {
       void AssetDB.get<Blob>(AssetDB.STORE_ASSETS, videoMatch.id)
         .then((blob) => {
@@ -1612,6 +1597,10 @@ export function useVnRuntime() {
     () => filterResourceEntries(resourceEntries, assetQuery, assetFilter),
     [assetFilter, assetQuery, resourceEntries],
   );
+  const resourcePageCount = useMemo(
+    () => Math.max(1, Math.ceil(filteredResources.length / 12)),
+    [filteredResources.length],
+  );
   const backgroundAssetEntries = useMemo(
     () => manifestState.backgrounds || [],
     [manifestState.backgrounds],
@@ -1620,10 +1609,30 @@ export function useVnRuntime() {
     () => buildDebugMarkers(SCRIPT.lines),
     [],
   );
+  const debugPageCount = useMemo(
+    () => Math.max(1, Math.ceil(debugMarkers.length / 12)),
+    [debugMarkers.length],
+  );
   const filteredScenes = useMemo(
     () => filterSceneNames(SCRIPT_SCENES, sceneQuery),
     [sceneQuery],
   );
+
+  useEffect(() => {
+    if (resourcePage >= resourcePageCount) {
+      setResourcePage(Math.max(0, resourcePageCount - 1));
+    }
+  }, [resourcePage, resourcePageCount]);
+
+  useEffect(() => {
+    if (debugPage >= debugPageCount) {
+      setDebugPage(Math.max(0, debugPageCount - 1));
+    }
+  }, [debugPage, debugPageCount]);
+
+  useEffect(() => {
+    setResourcePage(0);
+  }, [assetFilter, assetQuery]);
 
   return (
     <div id="app-root" className={lowPerfMode ? "low-perf" : ""}>
@@ -1914,6 +1923,10 @@ export function useVnRuntime() {
                         navigator.clipboard?.writeText(value).catch(() => undefined);
                         setAssetQuery(value);
                       }}
+                      resourcePage={resourcePage}
+                      resourcePageCount={resourcePageCount}
+                      resourceCount={filteredResources.length}
+                      onResourcePageChange={setResourcePage}
                     />
                   )}
                 </div>
@@ -2110,6 +2123,10 @@ export function useVnRuntime() {
                 navigator.clipboard?.writeText(value).catch(() => undefined);
                 setAssetQuery(value);
               }}
+              resourcePage={resourcePage}
+              resourcePageCount={resourcePageCount}
+              resourceCount={filteredResources.length}
+              onResourcePageChange={setResourcePage}
             />
           </div>
 
@@ -2177,6 +2194,10 @@ export function useVnRuntime() {
                 setActivePanel(null);
                 pulseUi("scene");
               }}
+              debugPage={debugPage}
+              debugPageCount={debugPageCount}
+              debugCount={debugMarkers.length}
+              onDebugPageChange={setDebugPage}
             />
           </div>
 

@@ -1,7 +1,16 @@
 import type { Manifest } from "./vnCore";
 
 export type ResourceLike = { kind: keyof Manifest | "all"; id: string; label: string };
-type ScriptLineLike = { kind: string; text?: string; name?: string; speaker?: string; cg?: string };
+type ScriptLineLike = { kind: string; text?: string; name?: string; speaker?: string; cg?: string; scene?: string };
+
+export function findBestAssetMatch<T extends { id: string; label: string }>(items: T[] | undefined, queries: string[]) {
+  if (!items || items.length === 0) return undefined;
+  const loweredQueries = queries.map((query) => query.toLowerCase()).filter(Boolean);
+  return (
+    items.find((item) => loweredQueries.some((query) => item.label.toLowerCase().includes(query) || item.id.toLowerCase().includes(query))) ||
+    items[0]
+  );
+}
 
 export function buildResourceEntries(manifest: Manifest): ResourceLike[] {
   return Object.entries(manifest).flatMap(([kind, items]) =>
@@ -35,6 +44,16 @@ export function buildDebugMarkers(lines: ScriptLineLike[]) {
 export function filterSceneNames(sceneNames: string[], query: string) {
   const q = query.trim().toLowerCase();
   return sceneNames.filter((scene) => !q || scene.toLowerCase().includes(q));
+}
+
+export function collectScriptScenes(lines: ScriptLineLike[]) {
+  return Array.from(
+    new Set(
+      lines
+        .map((line) => line.scene?.trim())
+        .filter((scene): scene is string => Boolean(scene)),
+    ),
+  );
 }
 
 export function getSceneProgress(index: number, total: number) {

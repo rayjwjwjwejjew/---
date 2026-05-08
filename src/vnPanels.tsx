@@ -35,6 +35,10 @@ type AssetsPanelProps = {
   resourceEntries: ResourceEntry[];
   filteredResources: ResourceEntry[];
   onCopyResourceName: (value: string) => void;
+  resourcePage: number;
+  resourcePageCount: number;
+  resourceCount: number;
+  onResourcePageChange: (value: number) => void;
 };
 
 type SavePanelProps = {
@@ -74,6 +78,10 @@ type DebugPanelProps = {
   onSwitchEmotion: () => void;
   onFlashWhite: () => void;
   onGoToMarker: (idx: number) => void;
+  debugPage: number;
+  debugPageCount: number;
+  debugCount: number;
+  onDebugPageChange: (value: number) => void;
 };
 
 export function SettingsPanel({ settings, onChange, onReset }: SettingsPanelProps) {
@@ -151,7 +159,13 @@ export function AssetsPanel({
   resourceEntries,
   filteredResources,
   onCopyResourceName,
+  resourcePage,
+  resourcePageCount,
+  resourceCount,
+  onResourcePageChange,
 }: AssetsPanelProps) {
+  const pageStart = resourcePage * 12;
+  const pageItems = filteredResources.slice(pageStart, pageStart + 12);
   return (
     <>
       <div className="card">
@@ -235,8 +249,8 @@ export function AssetsPanel({
       <div className="card">
         <div className="panel-title">资源列表</div>
         <div className="resource-list">
-          {filteredResources.length === 0 && <div className="tiny">没有符合条件的资源。</div>}
-          {filteredResources.slice(0, 24).map((item) => (
+          {pageItems.length === 0 && <div className="tiny">没有符合条件的资源。</div>}
+          {pageItems.map((item) => (
             <div key={`${item.kind}_${item.id}`} className="resource-item">
               <div>
                 <div className="resource-name">{item.label}</div>
@@ -245,6 +259,15 @@ export function AssetsPanel({
               <button className="btn" onClick={() => onCopyResourceName(item.label)}>复制名</button>
             </div>
           ))}
+        </div>
+        <div className="row" style={{ marginTop: 10 }}>
+          <button className="btn" onClick={() => onResourcePageChange(Math.max(0, resourcePage - 1))} disabled={resourcePage <= 0}>
+            上一页
+          </button>
+          <span className="tiny mono">{resourceCount === 0 ? "0/0" : `${resourcePage + 1}/${resourcePageCount}`}</span>
+          <button className="btn" onClick={() => onResourcePageChange(Math.min(resourcePageCount - 1, resourcePage + 1))} disabled={resourcePage + 1 >= resourcePageCount}>
+            下一页
+          </button>
         </div>
       </div>
     </>
@@ -374,7 +397,13 @@ export function DebugPanel({
   onSwitchEmotion,
   onFlashWhite,
   onGoToMarker,
+  debugPage,
+  debugPageCount,
+  debugCount,
+  onDebugPageChange,
 }: DebugPanelProps) {
+  const pageStart = debugPage * 12;
+  const pageItems = debugMarkers.slice(pageStart, pageStart + 12);
   return (
     <>
       <div className="card">
@@ -403,10 +432,10 @@ export function DebugPanel({
       <div className="card">
         <div className="row">
           <span className="label">章节点</span>
-          <span className="tiny mono">{debugMarkers.length}</span>
+          <span className="tiny mono">{debugCount}</span>
         </div>
         <div className="debug-list">
-          {debugMarkers.map((item) => (
+          {pageItems.map((item) => (
             <button
               key={`${item.idx}_${item.line.kind}`}
               className="debug-item"
@@ -416,6 +445,15 @@ export function DebugPanel({
               <span className="tiny mono">#{item.idx}</span>
             </button>
           ))}
+        </div>
+        <div className="row" style={{ marginTop: 10 }}>
+          <button className="btn" onClick={() => onDebugPageChange(Math.max(0, debugPage - 1))} disabled={debugPage <= 0}>
+            上一页
+          </button>
+          <span className="tiny mono">{debugCount === 0 ? "0/0" : `${debugPage + 1}/${debugPageCount}`}</span>
+          <button className="btn" onClick={() => onDebugPageChange(Math.min(debugPageCount - 1, debugPage + 1))} disabled={debugPage + 1 >= debugPageCount}>
+            下一页
+          </button>
         </div>
       </div>
     </>
