@@ -29,6 +29,7 @@ import {
 } from "./vnCore";
 import { ensureImageReady, queueImagePreload } from "./vnMedia";
 import { AssetsPanel, BgmPanel, DebugPanel, SavePanel, SettingsPanel } from "./vnPanels";
+import { CreditsScene, PlayingScene, TitleScene } from "./vnScenes";
 import {
   buildDebugMarkers,
   collectScriptScenes,
@@ -384,7 +385,16 @@ export function useVnRuntime() {
   const [settings, setSettings] = useState<Settings>(() => readJson(STORAGE_KEYS.settings, DEFAULT_SETTINGS));
   const [phase, setPhase] = useState<GamePhase>("warning");
   const [log, setLog] = useState<LogItem[]>([]);
-  const [showLog, setShowLog] = useState(false);
+  const [ui, setUi] = useState({
+    showLog: false,
+    activePanel: null as string | null,
+    showQaPanel: false,
+    openQaIndex: null as number | null,
+    workspaceMode: "player" as "player" | "editor",
+  });
+  const showLog = ui.showLog;
+  const showQaPanel = ui.showQaPanel;
+  const openQaIndex = ui.openQaIndex;
   const [typing, setTyping] = useState(false);
   const [displayedText, setDisplayedText] = useState("");
   const [auto, setAuto] = useState(false);
@@ -392,7 +402,7 @@ export function useVnRuntime() {
   const [bgUrl, setBgUrl] = useState(DEFAULT_BG);
   const [prevBgUrl, setPrevBgUrl] = useState("");
   const [currentAct, setCurrentAct] = useState("");
-  const [activePanel, setActivePanel] = useState<string | null>(null);
+  const activePanel = ui.activePanel;
   const [codeTxtUrl, setCodeTxtUrl] = useState("");
   const [transitionActive, setTransitionActive] = useState(false);
   const [transitionType, setTransitionType] = useState("fade-black");
@@ -420,11 +430,9 @@ export function useVnRuntime() {
   const [startTransitioning, setStartTransitioning] = useState(false);
   const [screenFlashVisible, setScreenFlashVisible] = useState(false);
   const [creditsRollReady, setCreditsRollReady] = useState(false);
-  const [showQaPanel, setShowQaPanel] = useState(false);
-  const [openQaIndex, setOpenQaIndex] = useState<number | null>(null);
   const [saveSlots, setSaveSlots] = useState<Array<SaveSlot | null>>(() => readSaveSlots(SAVE_SLOT_COUNT));
   const [selectedSaveSlot, setSelectedSaveSlot] = useState(0);
-  const [workspaceMode, setWorkspaceMode] = useState<"player" | "editor">("player");
+  const workspaceMode = ui.workspaceMode;
   const isEditorMode = workspaceMode === "editor";
   const [assetQuery, setAssetQuery] = useState("");
   const [assetFilter, setAssetFilter] = useState<keyof Manifest | "all">("all");
@@ -460,6 +468,41 @@ export function useVnRuntime() {
   const preludeTimerRef = useRef<number | null>(null);
   const uiPulseRef = useRef<number | null>(null);
   const cgSeenRef = useRef("");
+
+  const setShowLog = useCallback((value: boolean | ((prev: boolean) => boolean)) => {
+    setUi((prev) => ({
+      ...prev,
+      showLog: typeof value === "function" ? value(prev.showLog) : value,
+    }));
+  }, []);
+
+  const setActivePanel = useCallback((value: string | null | ((prev: string | null) => string | null)) => {
+    setUi((prev) => ({
+      ...prev,
+      activePanel: typeof value === "function" ? value(prev.activePanel) : value,
+    }));
+  }, []);
+
+  const setShowQaPanel = useCallback((value: boolean | ((prev: boolean) => boolean)) => {
+    setUi((prev) => ({
+      ...prev,
+      showQaPanel: typeof value === "function" ? value(prev.showQaPanel) : value,
+    }));
+  }, []);
+
+  const setOpenQaIndex = useCallback((value: number | null | ((prev: number | null) => number | null)) => {
+    setUi((prev) => ({
+      ...prev,
+      openQaIndex: typeof value === "function" ? value(prev.openQaIndex) : value,
+    }));
+  }, []);
+
+  const setWorkspaceMode = useCallback((value: "player" | "editor" | ((prev: "player" | "editor") => "player" | "editor")) => {
+    setUi((prev) => ({
+      ...prev,
+      workspaceMode: typeof value === "function" ? value(prev.workspaceMode) : value,
+    }));
+  }, []);
 
   const curLine = SCRIPT.lines[index];
 
@@ -1662,7 +1705,7 @@ export function useVnRuntime() {
       )}
 
       {phase === "title" && (
-        <div id="title-screen" className={titleReady ? "ready" : ""}>
+        <TitleScene ready={titleReady}>
           <div
             className="title-bg"
             style={{
@@ -1947,11 +1990,11 @@ export function useVnRuntime() {
               </div>
             </div>
           )}
-        </div>
+        </TitleScene>
       )}
 
       {phase === "credits" && (
-        <div id="credits-screen" className="show">
+        <CreditsScene>
           <div
             className="credits-bg"
             style={{
@@ -2000,11 +2043,11 @@ export function useVnRuntime() {
             <div className="credit-thanks">感谢游玩</div>
             <div className="credit-ending-copy">愿每一个在暮色中等待的人，最终都能回家。</div>
           </div>
-        </div>
+        </CreditsScene>
       )}
 
       {phase === "playing" && (
-        <div className={`game-screen ${effectClasses} ${bgmMoodClass}`}>
+        <PlayingScene className={`game-screen ${effectClasses} ${bgmMoodClass}`}>
           <div className={`bg-container ${transitionActive ? "cinematic" : ""}`}>
             {prevBgUrl && transitionActive && transitionType === "dissolve" && (
               <div className="bg-layer bg-prev bg-cinematic-prev" style={{ backgroundImage: `url("${prevBgUrl}")` }} />
@@ -2328,7 +2371,7 @@ export function useVnRuntime() {
               </div>
             </div>
           </div>
-        </div>
+        </PlayingScene>
       )}
 
       <div className={`screen-flash ${screenFlashVisible ? "show start-flash" : ""}`}>
