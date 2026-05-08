@@ -728,28 +728,45 @@ const BG = {
   basketballCourt: basketballCourtScene(),
 } as const;
 
-const STORY_SCENE_BG = "https://i.imgur.com/tYTooOo.png";
+const LOCAL_BG = {
+  schoolExterior: "/scene-bg/school-exterior.png",
+  schoolFront: "/scene-bg/school-front.png",
+  schoolInterior: "/scene-bg/school-interior.png",
+  classroomCorridor: "/scene-bg/classroom-corridor.png",
+  sportsFieldNight: "/scene-bg/sports-field-night.png",
+  basementDoor: "/scene-bg/basement-door.png",
+  basementDark: "/scene-bg/basement-dark.png",
+  dormRoom: "/scene-bg/dorm-room.png",
+  dormCommon: "/scene-bg/dorm-common.png",
+  hospitalRoom: "/scene-bg/hospital-room.png",
+  hospitalWaiting: "/scene-bg/hospital-waiting.jpg",
+  library: "/scene-bg/library.png",
+  rooftopSunset: "/scene-bg/rooftop-sunset.png",
+  teacherRoom: "/scene-bg/teacher-room.png",
+} as const;
+
+const STORY_SCENE_BG = LOCAL_BG.schoolExterior;
 
 export const DEFAULT_BG = STORY_SCENE_BG;
 
 export const SCENE_BG: Record<string, string> = {
-  underground: STORY_SCENE_BG,
-  undergroundDark: STORY_SCENE_BG,
-  undergroundDoor: STORY_SCENE_BG,
-  corridor: STORY_SCENE_BG,
-  corridorNight: STORY_SCENE_BG,
-  dormNight: STORY_SCENE_BG,
-  dormDay: STORY_SCENE_BG,
+  underground: LOCAL_BG.basementDark,
+  undergroundDark: LOCAL_BG.basementDark,
+  undergroundDoor: LOCAL_BG.basementDoor,
+  corridor: LOCAL_BG.schoolInterior,
+  corridorNight: LOCAL_BG.classroomCorridor,
+  dormNight: LOCAL_BG.dormRoom,
+  dormDay: LOCAL_BG.dormRoom,
   cafeteria: STORY_SCENE_BG,
-  library: STORY_SCENE_BG,
-  hospital: STORY_SCENE_BG,
-  hospitalRoom: STORY_SCENE_BG,
-  sportsField: STORY_SCENE_BG,
-  sportsEvening: STORY_SCENE_BG,
-  basketball: STORY_SCENE_BG,
-  classroom: STORY_SCENE_BG,
-  classroomEmpty: STORY_SCENE_BG,
-  rooftopSunset: STORY_SCENE_BG,
+  library: LOCAL_BG.library,
+  hospital: LOCAL_BG.hospitalWaiting,
+  hospitalRoom: LOCAL_BG.hospitalRoom,
+  sportsField: LOCAL_BG.schoolFront,
+  sportsEvening: LOCAL_BG.sportsFieldNight,
+  basketball: LOCAL_BG.sportsFieldNight,
+  classroom: LOCAL_BG.schoolInterior,
+  classroomEmpty: LOCAL_BG.schoolInterior,
+  rooftopSunset: LOCAL_BG.rooftopSunset,
   rooftopDay: STORY_SCENE_BG,
   dreamField: STORY_SCENE_BG,
   rainy: STORY_SCENE_BG,
@@ -757,20 +774,20 @@ export const SCENE_BG: Record<string, string> = {
   bus: STORY_SCENE_BG,
   office: STORY_SCENE_BG,
   gymnasium: STORY_SCENE_BG,
-  schoolBldg: STORY_SCENE_BG,
-  schoolDawn: STORY_SCENE_BG,
-  schoolNight: STORY_SCENE_BG,
+  schoolBldg: LOCAL_BG.schoolExterior,
+  schoolDawn: LOCAL_BG.schoolExterior,
+  schoolNight: LOCAL_BG.schoolExterior,
   garden: STORY_SCENE_BG,
   gardenRain: STORY_SCENE_BG,
-  teacherRoom: STORY_SCENE_BG,
+  teacherRoom: LOCAL_BG.teacherRoom,
   adminBldg: STORY_SCENE_BG,
-  schoolEvent: STORY_SCENE_BG,
+  schoolEvent: LOCAL_BG.schoolFront,
   stands: STORY_SCENE_BG,
   policeScene: STORY_SCENE_BG,
   nightSky: STORY_SCENE_BG,
   overcast: STORY_SCENE_BG,
-  sunset: STORY_SCENE_BG,
-  meetingRoom: STORY_SCENE_BG,
+  sunset: LOCAL_BG.rooftopSunset,
+  meetingRoom: LOCAL_BG.teacherRoom,
 };
 
 export const CHARACTER_SPRITES: Record<string, string> = {
@@ -898,25 +915,29 @@ function getSceneEffect(scene: string): string | undefined {
 export function getSceneBg(scene: string | undefined): string | null {
   if (!scene) return null;
   const s = scene;
+  if (s.includes("操场边")) return LOCAL_BG.schoolFront;
+  if (s.includes("空无一人的篮球场")) return LOCAL_BG.sportsFieldNight;
   if (s.includes("地下室") && (s.includes("门口") || s.includes("入口"))) return SCENE_BG.undergroundDoor;
   if (s.includes("地下室")) return SCENE_BG.undergroundDark;
   if (s.includes("何老师房间")) return SCENE_BG.teacherRoom;
   if (s.includes("教工宿舍")) return SCENE_BG.teacherRoom;
-  if (s.includes("宿舍楼下")) return BG.houseExterior;
+  if (s.includes("宿舍楼下")) return LOCAL_BG.schoolFront;
   if (s.includes("学校花园旧址")) return SCENE_BG.garden;
   if (s.includes("暴雨中的花园")) return SCENE_BG.gardenRain;
   if (s.includes("花园") || s.includes("花圃")) return s.includes("雨") ? SCENE_BG.gardenRain : SCENE_BG.garden;
   if (s.includes("病房内")) return SCENE_BG.hospitalRoom;
   if (s.includes("病房门口")) return SCENE_BG.hospital;
+  if (s.includes("附属医院门口")) return SCENE_BG.hospital;
   if (s.includes("医院")) return SCENE_BG.hospital;
   if (s.includes("食堂")) return SCENE_BG.cafeteria;
   if (s.includes("图书馆")) return SCENE_BG.library;
   if (s.includes("教室窗边")) return SCENE_BG.classroomEmpty;
   if (s.includes("教室") || s.includes("教学楼") || s.includes("早读") || s.includes("自习")) return SCENE_BG.classroom;
-  if (s.includes("教学楼内")) return SCENE_BG.corridorNight;
+  if (s.includes("教学楼内")) return SCENE_BG.classroom;
   if (s.includes("走廊")) return s.includes("夜") ? SCENE_BG.corridorNight : SCENE_BG.corridor;
   if (s.includes("寝室") || s.includes("宿舍")) return s.includes("夜") || s.includes("深夜") ? SCENE_BG.dormNight : SCENE_BG.dormDay;
   if (s.includes("天台")) return s.includes("夕阳") ? SCENE_BG.rooftopSunset : SCENE_BG.rooftopDay;
+  if (s.includes("学校")) return SCENE_BG.schoolBldg;
   if (s.includes("梦境") || s.includes("回忆")) return SCENE_BG.dreamField;
   if (s.includes("回学校") || s.includes("公交车")) return SCENE_BG.bus;
   if (s.includes("篮球场")) return SCENE_BG.basketball;

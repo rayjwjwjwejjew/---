@@ -399,8 +399,8 @@ export function useVnRuntime() {
   const [displayedText, setDisplayedText] = useState("");
   const [auto, setAuto] = useState(false);
   const [skip, setSkip] = useState(false);
-  const [bgUrl, setBgUrl] = useState(DEFAULT_BG);
-  const [prevBgUrl, setPrevBgUrl] = useState("");
+  const [bgUrl, setBgUrl] = useState<string>(DEFAULT_BG);
+  const [prevBgUrl, setPrevBgUrl] = useState<string>("");
   const [currentAct, setCurrentAct] = useState("");
   const activePanel = ui.activePanel;
   const [codeTxtUrl, setCodeTxtUrl] = useState("");
