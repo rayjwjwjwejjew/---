@@ -65,6 +65,17 @@ type BgmPanelProps = {
   onSettingsChange: (updater: (value: Settings) => Settings) => void;
 };
 
+type DebugPanelProps = {
+  debugMarkers: { line: { kind: string; text?: string; name?: string; speaker?: string }; idx: number }[];
+  onJumpStart: () => void;
+  onJumpRandom: () => void;
+  onTriggerCg: () => void;
+  onSwitchBg: () => void;
+  onSwitchEmotion: () => void;
+  onFlashWhite: () => void;
+  onGoToMarker: (idx: number) => void;
+};
+
 export function SettingsPanel({ settings, onChange, onReset }: SettingsPanelProps) {
   return (
     <div className="card">
@@ -348,6 +359,63 @@ export function BgmPanel({
           <span className="label">音效音量</span>
           <input type="range" min="0" max="100" value={sfxVol} onChange={(e) => onSettingsChange((s) => ({ ...s, sfxVol: Number(e.target.value) }))} />
           <span className="tiny mono">{sfxVol}%</span>
+        </div>
+      </div>
+    </>
+  );
+}
+
+export function DebugPanel({
+  debugMarkers,
+  onJumpStart,
+  onJumpRandom,
+  onTriggerCg,
+  onSwitchBg,
+  onSwitchEmotion,
+  onFlashWhite,
+  onGoToMarker,
+}: DebugPanelProps) {
+  return (
+    <>
+      <div className="card">
+        <div className="panel-title">作者调试</div>
+        <div className="row">
+          <button className="btn" onClick={onJumpStart}>
+            跳到开头
+          </button>
+          <button className="btn" onClick={onJumpRandom}>
+            随机跳章
+          </button>
+          <button className="btn" onClick={onTriggerCg}>
+            触发 CG
+          </button>
+          <button className="btn" onClick={onSwitchBg}>
+            切背景
+          </button>
+          <button className="btn" onClick={onSwitchEmotion}>
+            切表情
+          </button>
+          <button className="btn" onClick={onFlashWhite}>
+            闪白
+          </button>
+        </div>
+      </div>
+      <div className="card">
+        <div className="row">
+          <span className="label">章节点</span>
+          <span className="tiny mono">{debugMarkers.length}</span>
+        </div>
+        <div className="debug-list">
+          {debugMarkers.map((item) => (
+            <button
+              key={`${item.idx}_${item.line.kind}`}
+              className="debug-item"
+              onClick={() => onGoToMarker(item.idx)}
+            >
+              <span className="debug-item-label">{item.line.text || item.line.name || item.line.speaker || "节点"}</span>
+              <span className="tiny mono">#{item.idx}</span>
+            </button>
+          ))}
         </div>
       </div>
     </>

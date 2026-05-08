@@ -28,7 +28,7 @@ import {
   writeSceneBgOverrides,
 } from "./vnCore";
 import { ensureImageReady, queueImagePreload } from "./vnMedia";
-import { AssetsPanel, BgmPanel, SavePanel, SettingsPanel, type ResourceEntry } from "./vnPanels";
+import { AssetsPanel, BgmPanel, DebugPanel, SavePanel, SettingsPanel, type ResourceEntry } from "./vnPanels";
 import appSource from "./App.tsx?raw";
 import mainSource from "./main.tsx?raw";
 import engineSource from "./engine.ts?raw";
@@ -394,7 +394,7 @@ const FloatingBgm = memo(function FloatingBgm({
   );
 });
 
-export function App() {
+export function useVnRuntime() {
   const [index, setIndex] = useState(0);
   const [settings, setSettings] = useState<Settings>(() => readJson(STORAGE_KEYS.settings, DEFAULT_SETTINGS));
   const [phase, setPhase] = useState<GamePhase>("warning");
@@ -1619,109 +1619,6 @@ export function App() {
     return !q || scene.toLowerCase().includes(q);
   });
 
-  const debugPanelContent = (
-    <>
-      <div className="card">
-        <div className="panel-title">作者调试</div>
-        <div className="row">
-          <button
-            className="btn"
-            onClick={() => {
-              setIndex(0);
-              setPhase("playing");
-              setActivePanel(null);
-              pulseUi("scene");
-            }}
-          >
-            跳到开头
-          </button>
-          <button
-            className="btn"
-            onClick={() => {
-              const jump = debugMarkers[Math.floor(Math.random() * Math.max(1, debugMarkers.length))];
-              if (jump) {
-                setIndex(jump.idx);
-                setPhase("playing");
-                pulseUi("scene");
-              }
-            }}
-          >
-            随机跳章
-          </button>
-          <button
-            className="btn"
-            onClick={() => {
-              if (!curLine) return;
-              setCgTitle(curLine.cg || "调试 CG");
-              setCgImageUrl(bgUrl || DEFAULT_BG);
-              setCgVisible(true);
-              pulseUi("cg");
-            }}
-          >
-            触发 CG
-          </button>
-          <button
-            className="btn"
-            onClick={() => {
-              const nextBg = bgUrl === TITLE_SCREEN_BG ? resolveSceneBackground(curLine?.scene) : TITLE_SCREEN_BG;
-              setBgUrl(nextBg);
-              lastBgRef.current = nextBg;
-              pulseUi("scene");
-            }}
-          >
-            切背景
-          </button>
-          <button
-            className="btn"
-            onClick={() => {
-              setStageChars((prev) =>
-                prev.map((ch) => ({
-                  ...ch,
-                  expression: ch.expression === "panic" ? "calm" : "panic",
-                })),
-              );
-              pulseUi("emotion");
-            }}
-          >
-            切表情
-          </button>
-          <button
-            className="btn"
-            onClick={() => {
-              triggerEffect("flash-white");
-              pulseUi("ui");
-            }}
-          >
-            闪白
-          </button>
-        </div>
-      </div>
-      <div className="card">
-        <div className="row">
-          <span className="label">章节点</span>
-          <span className="tiny mono">{debugMarkers.length}</span>
-        </div>
-        <div className="debug-list">
-          {debugMarkers.map((item) => (
-            <button
-              key={`${item.idx}_${item.line.kind}`}
-              className="debug-item"
-              onClick={() => {
-                setIndex(item.idx);
-                setPhase("playing");
-                setActivePanel(null);
-                pulseUi("scene");
-              }}
-            >
-              <span className="debug-item-label">{item.line.text || item.line.name || item.line.speaker || "节点"}</span>
-              <span className="tiny mono">#{item.idx}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-    </>
-  );
-
   return (
     <div id="app-root" className={lowPerfMode ? "low-perf" : ""}>
       {phase === "warning" && (
@@ -2226,7 +2123,55 @@ export function App() {
           </div>
 
           <div className={`panel ${activePanel === "debug" ? "show" : ""}`}>
-            {debugPanelContent}
+            <DebugPanel
+              debugMarkers={debugMarkers}
+              onJumpStart={() => {
+                setIndex(0);
+                setPhase("playing");
+                setActivePanel(null);
+                pulseUi("scene");
+              }}
+              onJumpRandom={() => {
+                const jump = debugMarkers[Math.floor(Math.random() * Math.max(1, debugMarkers.length))];
+                if (jump) {
+                  setIndex(jump.idx);
+                  setPhase("playing");
+                  pulseUi("scene");
+                }
+              }}
+              onTriggerCg={() => {
+                if (!curLine) return;
+                setCgTitle(curLine.cg || "调试 CG");
+                setCgImageUrl(bgUrl || DEFAULT_BG);
+                setCgVisible(true);
+                pulseUi("cg");
+              }}
+              onSwitchBg={() => {
+                const nextBg = bgUrl === TITLE_SCREEN_BG ? resolveSceneBackground(curLine?.scene) : TITLE_SCREEN_BG;
+                setBgUrl(nextBg);
+                lastBgRef.current = nextBg;
+                pulseUi("scene");
+              }}
+              onSwitchEmotion={() => {
+                setStageChars((prev) =>
+                  prev.map((ch) => ({
+                    ...ch,
+                    expression: ch.expression === "panic" ? "calm" : "panic",
+                  })),
+                );
+                pulseUi("emotion");
+              }}
+              onFlashWhite={() => {
+                triggerEffect("flash-white");
+                pulseUi("ui");
+              }}
+              onGoToMarker={(idx) => {
+                setIndex(idx);
+                setPhase("playing");
+                setActivePanel(null);
+                pulseUi("scene");
+              }}
+            />
           </div>
 
           <div className={`panel ${activePanel === "settings" ? "show" : ""}`}>
@@ -2352,4 +2297,8 @@ export function App() {
       )}
     </div>
   );
+}
+
+export function App() {
+  return useVnRuntime();
 }
