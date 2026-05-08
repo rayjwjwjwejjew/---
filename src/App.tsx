@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./index.css";
 import {
   CHARACTER_COLORS,
@@ -28,7 +28,16 @@ import {
   writeSceneBgOverrides,
 } from "./vnCore";
 import { ensureImageReady, queueImagePreload } from "./vnMedia";
-import { AssetsPanel, BgmPanel, DebugPanel, SavePanel, SettingsPanel, type ResourceEntry } from "./vnPanels";
+import { AssetsPanel, BgmPanel, DebugPanel, SavePanel, SettingsPanel } from "./vnPanels";
+import {
+  buildDebugMarkers,
+  buildResourceEntries,
+  filterResourceEntries,
+  filterSceneNames,
+  getBgmMoodClass,
+  getCurrentBgmLabel,
+  getSceneProgress,
+} from "./vnDerived";
 import appSource from "./App.tsx?raw";
 import mainSource from "./main.tsx?raw";
 import engineSource from "./engine.ts?raw";
@@ -136,13 +145,6 @@ function getLineTypingDelay(text: string, index: number, baseMs: number) {
     delay *= 1.08;
   }
   return Math.max(10, Math.min(240, delay));
-}
-
-function getBgmMoodClass(name: string): string {
-  if (!name) return "bgm-neutral";
-  if (/(悬疑|压抑|紧张|高潮|审判|恐怖)/.test(name)) return "bgm-tense";
-  if (/(告别|钢琴|日常|治愈|安静|忧郁|悲伤)/.test(name)) return "bgm-soft";
-  return "bgm-neutral";
 }
 
 function getCodeFenceLanguage(path: string): string {
@@ -1591,33 +1593,37 @@ export function useVnRuntime() {
   const speaker = curLine?.speaker;
   const showName = Boolean(speaker && speaker !== "旁白" && speaker !== "SYSTEM");
   const speakerColor = speaker ? CHARACTER_COLORS[speaker] || "rgba(255,241,248,0.96)" : "rgba(255,241,248,0.96)";
-  const currentBgmLabel = bgmList.find((item) => item.id === currentBgmId)?.label || currentBgmName || "";
-  const bgmMoodClass = getBgmMoodClass(currentBgmLabel);
-  const sceneProgress = `${Math.min(index + 1, SCRIPT.lines.length)}/${SCRIPT.lines.length}`;
-  const titlePanelOpen = phase === "title" && (activePanel === "settings" || activePanel === "assets");
-  const hasContinueSave = Boolean(localStorage.getItem(STORAGE_KEYS.save));
-  const resourceEntries: ResourceEntry[] = Object.entries(manifestState).flatMap(([kind, items]) =>
-    (items || []).map((item) => ({
-      ...item,
-      kind: kind as ResourceEntry["kind"],
-    })),
+  const currentBgmLabel = useMemo(
+    () => getCurrentBgmLabel(bgmList, currentBgmId, currentBgmName),
+    [bgmList, currentBgmId, currentBgmName],
   );
-  const filteredResources = resourceEntries.filter((item) => {
-    const matchesKind = assetFilter === "all" || assetFilter === item.kind;
-    const q = assetQuery.trim().toLowerCase();
-    const matchesQuery = !q || item.label.toLowerCase().includes(q) || item.id.toLowerCase().includes(q);
-    return matchesKind && matchesQuery;
-  });
-  const backgroundAssetEntries = manifestState.backgrounds || [];
-  const debugMarkers = SCRIPT.lines
-    .map((line, idx) => ({ line, idx }))
-    .filter(({ line }) => line.kind === "title" || line.kind === "label" || line.cg)
-    .slice(0, 48);
-  const sceneOptions = SCRIPT_SCENES;
-  const filteredScenes = sceneOptions.filter((scene) => {
-    const q = sceneQuery.trim().toLowerCase();
-    return !q || scene.toLowerCase().includes(q);
-  });
+  const bgmMoodClass = useMemo(() => getBgmMoodClass(currentBgmLabel), [currentBgmLabel]);
+  const sceneProgress = useMemo(() => getSceneProgress(index, SCRIPT.lines.length), [index]);
+  const titlePanelOpen = useMemo(
+    () => phase === "title" && (activePanel === "settings" || activePanel === "assets"),
+    [activePanel, phase],
+  );
+  const hasContinueSave = Boolean(localStorage.getItem(STORAGE_KEYS.save));
+  const resourceEntries = useMemo(
+    () => buildResourceEntries(manifestState),
+    [manifestState],
+  );
+  const filteredResources = useMemo(
+    () => filterResourceEntries(resourceEntries, assetQuery, assetFilter),
+    [assetFilter, assetQuery, resourceEntries],
+  );
+  const backgroundAssetEntries = useMemo(
+    () => manifestState.backgrounds || [],
+    [manifestState.backgrounds],
+  );
+  const debugMarkers = useMemo(
+    () => buildDebugMarkers(SCRIPT.lines),
+    [],
+  );
+  const filteredScenes = useMemo(
+    () => filterSceneNames(SCRIPT_SCENES, sceneQuery),
+    [sceneQuery],
+  );
 
   return (
     <div id="app-root" className={lowPerfMode ? "low-perf" : ""}>
