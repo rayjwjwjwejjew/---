@@ -28,6 +28,7 @@ import {
   writeSceneBgOverrides,
 } from "./vnCore";
 import { ensureImageReady, queueImagePreload } from "./vnMedia";
+import { AssetsPanel, SavePanel, SettingsPanel, type ResourceEntry } from "./vnPanels";
 import appSource from "./App.tsx?raw";
 import mainSource from "./main.tsx?raw";
 import engineSource from "./engine.ts?raw";
@@ -669,6 +670,32 @@ export function App() {
     [ensureBackgroundAssetUrl, pulseUi, sceneBgOverrides],
   );
 
+  const bindSceneUrl = useCallback(
+    (scene: string, url: string) => {
+      const nextOverrides: Record<string, SceneBgOverride> = {
+        ...sceneBgOverrides,
+        [scene]: { source: "url", value: url, label: url },
+      };
+      setSceneBgOverrides(nextOverrides);
+      writeSceneBgOverrides(nextOverrides);
+      setBgUrl(url);
+      lastBgRef.current = url;
+      pulseUi("scene");
+    },
+    [pulseUi, sceneBgOverrides],
+  );
+
+  const clearSceneBinding = useCallback(
+    (scene: string) => {
+      void applySceneBackground(scene, null);
+      if (selectedSceneName === scene) {
+        setCustomSceneBgUrl("");
+        setSelectedBackgroundAssetId("");
+      }
+    },
+    [applySceneBackground, selectedSceneName],
+  );
+
   useEffect(() => {
     const root = document.documentElement.style;
     root.setProperty("--dim", `${settings.dim / 100}`);
@@ -701,6 +728,18 @@ export function App() {
   useEffect(() => {
     refreshBgmList();
   }, [refreshBgmList]);
+
+  const batchRenameResources = useCallback(() => {
+    const next = prompt("批量重命名：输入前缀");
+    if (!next) return;
+    const updated: Manifest = { ...manifestState };
+    (["backgrounds", "sprite", "video", "bgm", "sfx"] as const).forEach((kind) => {
+      updated[kind] = (updated[kind] || []).map((item, idx) => ({ ...item, label: `${next}-${idx + 1}` }));
+    });
+    localStorage.setItem(STORAGE_KEYS.manifest, JSON.stringify(updated));
+    setManifestState(updated);
+    refreshBgmList();
+  }, [manifestState, refreshBgmList]);
 
   useEffect(() => {
     setSaveSlots(readSaveSlots(SAVE_SLOT_COUNT));
@@ -1557,10 +1596,10 @@ export function App() {
   const sceneProgress = `${Math.min(index + 1, SCRIPT.lines.length)}/${SCRIPT.lines.length}`;
   const titlePanelOpen = phase === "title" && (activePanel === "settings" || activePanel === "assets");
   const hasContinueSave = Boolean(localStorage.getItem(STORAGE_KEYS.save));
-  const resourceEntries = Object.entries(manifestState).flatMap(([kind, items]) =>
+  const resourceEntries: ResourceEntry[] = Object.entries(manifestState).flatMap(([kind, items]) =>
     (items || []).map((item) => ({
       ...item,
-      kind,
+      kind: kind as ResourceEntry["kind"],
     })),
   );
   const filteredResources = resourceEntries.filter((item) => {
@@ -1579,292 +1618,6 @@ export function App() {
     const q = sceneQuery.trim().toLowerCase();
     return !q || scene.toLowerCase().includes(q);
   });
-
-  const settingsPanelContent = (
-    <>
-      <div className="card">
-        <div className="row">
-          <span className="label">文字速度</span>
-          <input type="range" min="0" max="60" value={settings.typeMs} onChange={(e) => setSettings((s) => ({ ...s, typeMs: Number(e.target.value) }))} />
-          <span className="tiny mono">{settings.typeMs}ms</span>
-        </div>
-        <div className="row">
-          <span className="label">自动间隔</span>
-          <input type="range" min="180" max="2200" step="20" value={settings.autoMs} onChange={(e) => setSettings((s) => ({ ...s, autoMs: Number(e.target.value) }))} />
-          <span className="tiny mono">{settings.autoMs}ms</span>
-        </div>
-        <div className="row">
-          <span className="label">屏幕暗度</span>
-          <input type="range" min="0" max="40" value={settings.dim} onChange={(e) => setSettings((s) => ({ ...s, dim: Number(e.target.value) }))} />
-          <span className="tiny mono">{settings.dim}%</span>
-        </div>
-        <div className="row">
-          <span className="label">立绘尺寸</span>
-          <input type="range" min="140" max="420" step="10" value={settings.spriteW} onChange={(e) => setSettings((s) => ({ ...s, spriteW: Number(e.target.value) }))} />
-          <span className="tiny mono">{settings.spriteW}px</span>
-        </div>
-        <div className="row">
-          <span className="label">立绘透明度</span>
-          <input type="range" min="0" max="100" value={settings.spriteOpacity} onChange={(e) => setSettings((s) => ({ ...s, spriteOpacity: Number(e.target.value) }))} />
-          <span className="tiny mono">{settings.spriteOpacity}%</span>
-        </div>
-        <div className="row">
-          <span className="label">背景缩放</span>
-          <input type="range" min="100" max="150" value={settings.bgScale} onChange={(e) => setSettings((s) => ({ ...s, bgScale: Number(e.target.value) }))} />
-          <span className="tiny mono">{settings.bgScale}%</span>
-        </div>
-        <div className="row">
-          <span className="label">对话层透明</span>
-          <input type="range" min="0" max="100" value={settings.uiAlpha} onChange={(e) => setSettings((s) => ({ ...s, uiAlpha: Number(e.target.value) }))} />
-          <span className="tiny mono">{settings.uiAlpha}%</span>
-        </div>
-        <div className="row">
-          <button className="btn" onClick={() => setSettings(DEFAULT_SETTINGS)}>
-            恢复默认
-          </button>
-          <span className="tiny">标题页只预览配置，开始游戏后仍可在左上角继续调整。</span>
-        </div>
-      </div>
-    </>
-  );
-
-  const assetsPanelContent = (
-    <>
-      <div className="card">
-        <div className="row">
-          <button className="btn" onClick={() => uploadAsset("bg")}>
-            上传背景
-          </button>
-          <button className="btn" onClick={() => uploadAsset("sprite")}>
-            上传立绘
-          </button>
-          <button className="btn" onClick={() => uploadAsset("video")}>
-            上传视频CG
-          </button>
-          <button className="btn" onClick={() => uploadAsset("bgm")}>
-            上传BGM
-          </button>
-          <button className="btn" onClick={() => uploadAsset("sfx")}>
-            上传音效
-          </button>
-        </div>
-        <div className="tiny">资源会保存在浏览器本地（IndexedDB）。</div>
-        <div className="tiny" style={{ marginTop: 6 }}>TXT 导出会按原始路径完整输出源码；PDF 导出已移除。</div>
-      </div>
-      <div className="card">
-        <div className="panel-title">场景选择器</div>
-        <div className="row">
-          <span className="label">场景搜索</span>
-          <input value={sceneQuery} onChange={(e) => setSceneQuery(e.target.value)} placeholder="输入场景名" />
-        </div>
-        <div className="row">
-          <span className="label">目标场景</span>
-          <select value={selectedSceneName} onChange={(e) => setSelectedSceneName(e.target.value)}>
-            <option value="">-- 选择场景 --</option>
-            {filteredScenes.slice(0, 80).map((scene) => (
-              <option key={scene} value={scene}>
-                {scene}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="row">
-          <span className="label">背景资源</span>
-          <select value={selectedBackgroundAssetId} onChange={(e) => setSelectedBackgroundAssetId(e.target.value)}>
-            <option value="">-- 选择上传背景 --</option>
-            {backgroundAssetEntries.map((item) => (
-              <option key={item.id} value={item.id}>
-                {item.label}
-              </option>
-            ))}
-          </select>
-        </div>
-        <div className="row">
-          <span className="label">自定义 URL</span>
-          <input value={customSceneBgUrl} onChange={(e) => setCustomSceneBgUrl(e.target.value)} placeholder="https://..." />
-        </div>
-        <div className="row">
-          <button
-            className="btn"
-            disabled={!selectedSceneName}
-            onClick={() => {
-              void previewSceneBackground(selectedSceneName);
-            }}
-          >
-            预览默认背景
-          </button>
-          <button
-            className="btn"
-            disabled={!selectedSceneName || !selectedBackgroundAssetId}
-            onClick={() => {
-              void applySceneBackground(selectedSceneName, selectedBackgroundAssetId || null);
-            }}
-          >
-            绑定上传背景
-          </button>
-          <button
-            className="btn"
-            disabled={!selectedSceneName || !customSceneBgUrl.trim()}
-            onClick={() => {
-              const nextOverrides: Record<string, SceneBgOverride> = {
-                ...sceneBgOverrides,
-                [selectedSceneName]: { source: "url", value: customSceneBgUrl.trim(), label: customSceneBgUrl.trim() },
-              };
-              setSceneBgOverrides(nextOverrides);
-              writeSceneBgOverrides(nextOverrides);
-              setBgUrl(customSceneBgUrl.trim());
-              lastBgRef.current = customSceneBgUrl.trim();
-              pulseUi("scene");
-            }}
-          >
-            绑定 URL
-          </button>
-          <button
-            className="btn"
-            disabled={!selectedSceneName}
-            onClick={() => {
-              void applySceneBackground(selectedSceneName, null);
-              setCustomSceneBgUrl("");
-              setSelectedBackgroundAssetId("");
-            }}
-          >
-            清除绑定
-          </button>
-        </div>
-        <div className="tiny">
-          当前绑定：
-          {selectedSceneName && sceneBgOverrides[selectedSceneName]
-            ? `${sceneBgOverrides[selectedSceneName].source === "asset" ? "资源" : "URL"} · ${sceneBgOverrides[selectedSceneName].label}`
-            : "未绑定"}
-        </div>
-        <div className="tiny">选场景后，可以把上传背景或自定义 URL 绑定到对应剧情段，再一键预览。 </div>
-      </div>
-      <div className="card">
-        <div className="row">
-          <span className="label">搜索资源</span>
-          <input value={assetQuery} onChange={(e) => setAssetQuery(e.target.value)} placeholder="输入文件名或标签" />
-        </div>
-        <div className="row">
-          {(["all", "backgrounds", "sprite", "video", "bgm", "sfx"] as const).map((kind) => (
-            <button
-              key={kind}
-              className="btn"
-              aria-pressed={assetFilter === kind}
-              onClick={() => setAssetFilter(kind)}
-            >
-              {kind === "all" ? "全部" : kind}
-            </button>
-          ))}
-          <button
-            className="btn"
-            onClick={() => {
-              const next = prompt("批量重命名：输入前缀");
-              if (!next) return;
-              const updated: Manifest = { ...manifestState };
-              (["backgrounds", "sprite", "video", "bgm", "sfx"] as const).forEach((kind) => {
-                updated[kind] = (updated[kind] || []).map((item, idx) => ({ ...item, label: `${next}-${idx + 1}` }));
-              });
-              localStorage.setItem(STORAGE_KEYS.manifest, JSON.stringify(updated));
-              setManifestState(updated);
-              refreshBgmList();
-            }}
-          >
-            批量改名
-          </button>
-        </div>
-        <div className="tiny">过滤后仅显示符合条件的资源，方便你快速查找。</div>
-      </div>
-      <div className="card">
-        <div className="row">
-          <span className="label">已上传BGM</span>
-          <span className="tiny mono">{bgmList.length}</span>
-        </div>
-        <div className="row">
-          <span className="label">已上传音效</span>
-          <span className="tiny mono">{sfxList.length}</span>
-        </div>
-        <div className="row">
-          <span className="label">资源总数</span>
-          <span className="tiny mono">{filteredResources.length}/{resourceEntries.length}</span>
-        </div>
-        <div className="tiny">建议文件名包含脚本关键词，便于自动匹配。</div>
-      </div>
-      <div className="card">
-        <div className="panel-title">资源列表</div>
-        <div className="resource-list">
-          {filteredResources.length === 0 && <div className="tiny">没有符合条件的资源。</div>}
-          {filteredResources.slice(0, 24).map((item) => (
-            <div key={`${item.kind}_${item.id}`} className="resource-item">
-              <div>
-                <div className="resource-name">{item.label}</div>
-                <div className="tiny mono">{item.kind} · {item.id}</div>
-              </div>
-              <button
-                className="btn"
-                onClick={() => {
-                  navigator.clipboard?.writeText(item.label).catch(() => undefined);
-                  setAssetQuery(item.label);
-                }}
-              >
-                复制名
-              </button>
-            </div>
-          ))}
-        </div>
-      </div>
-    </>
-  );
-
-  const savePanelContent = (
-    <>
-      <div className="card">
-        <div className="row">
-          <span className="label">当前槽位</span>
-          <select value={selectedSaveSlot} onChange={(e) => setSelectedSaveSlot(Number(e.target.value))}>
-            {Array.from({ length: SAVE_SLOT_COUNT }, (_, idx) => (
-              <option key={idx} value={idx}>
-                槽位 {idx + 1}
-              </option>
-            ))}
-          </select>
-          <button className="btn" onClick={() => saveGame(selectedSaveSlot, true)}>
-            存到当前槽
-          </button>
-          <button className="btn" onClick={() => saveGame(selectedSaveSlot, false)}>
-            仅更新继续
-          </button>
-        </div>
-        <div className="tiny">`仅更新继续` 会保留多槽存档，同时刷新标题页的“继续上次”。</div>
-      </div>
-      <div className="save-grid">
-        {saveSlots.map((slot, idx) => (
-          <div key={idx} className={`save-slot ${selectedSaveSlot === idx ? "selected" : ""}`}>
-            <div className="row save-slot-top">
-              <span className="label">槽位 {idx + 1}</span>
-              <span className="tiny mono">{slot ? slot.progress : "空槽"}</span>
-            </div>
-            <div className="tiny">{slot ? slot.act || "未命名章节" : "尚未存档"}</div>
-            <div className="tiny">{slot ? `${slot.speaker || "旁白"} · ${slot.text || "……"}` : "点击保存后会写入这一格"}</div>
-            <div className="tiny mono">{slot ? getSavedAtLabel(slot.savedAt) : "—"}</div>
-            <div className="row">
-              <button className="btn" onClick={() => setSelectedSaveSlot(idx)}>
-                选中
-              </button>
-              <button className="btn" onClick={() => saveGame(idx, true)}>
-                保存
-              </button>
-              <button className="btn" onClick={() => loadSaveSlot(idx)} disabled={!slot}>
-                读取
-              </button>
-              <button className="btn" onClick={() => deleteSaveSlot(idx)} disabled={!slot}>
-                删除
-              </button>
-            </div>
-          </div>
-        ))}
-      </div>
-    </>
-  );
 
   const debugPanelContent = (
     <>
@@ -2220,7 +1973,47 @@ export function App() {
                     关闭
                   </button>
                 </div>
-                <div className="title-panel-body">{activePanel === "settings" ? settingsPanelContent : assetsPanelContent}</div>
+                <div className="title-panel-body">
+                  {activePanel === "settings" ? (
+                    <SettingsPanel settings={settings} onChange={setSettings} onReset={() => setSettings(DEFAULT_SETTINGS)} />
+                  ) : (
+                    <AssetsPanel
+                      onUploadAsset={uploadAsset}
+                      sceneQuery={sceneQuery}
+                      onSceneQueryChange={setSceneQuery}
+                      selectedSceneName={selectedSceneName}
+                      onSelectedSceneNameChange={setSelectedSceneName}
+                      filteredScenes={filteredScenes}
+                      selectedBackgroundAssetId={selectedBackgroundAssetId}
+                      onSelectedBackgroundAssetIdChange={setSelectedBackgroundAssetId}
+                      backgroundAssetEntries={backgroundAssetEntries}
+                      customSceneBgUrl={customSceneBgUrl}
+                      onCustomSceneBgUrlChange={setCustomSceneBgUrl}
+                      onPreviewSceneBackground={previewSceneBackground}
+                      onApplySceneBackground={applySceneBackground}
+                      onBindSceneUrl={bindSceneUrl}
+                      onClearSceneBinding={clearSceneBinding}
+                      currentBindingText={
+                        selectedSceneName && sceneBgOverrides[selectedSceneName]
+                          ? `${sceneBgOverrides[selectedSceneName].source === "asset" ? "资源" : "URL"} · ${sceneBgOverrides[selectedSceneName].label}`
+                          : "未绑定"
+                      }
+                      assetQuery={assetQuery}
+                      onAssetQueryChange={setAssetQuery}
+                      assetFilter={assetFilter}
+                      onAssetFilterChange={setAssetFilter}
+                      onBatchRename={batchRenameResources}
+                      bgmCount={bgmList.length}
+                      sfxCount={sfxList.length}
+                      resourceEntries={resourceEntries}
+                      filteredResources={filteredResources}
+                      onCopyResourceName={(value) => {
+                        navigator.clipboard?.writeText(value).catch(() => undefined);
+                        setAssetQuery(value);
+                      }}
+                    />
+                  )}
+                </div>
               </div>
             </div>
           )}
@@ -2380,11 +2173,56 @@ export function App() {
           </div>
 
           <div className={`panel ${activePanel === "assets" ? "show" : ""}`}>
-            {assetsPanelContent}
+            <AssetsPanel
+              onUploadAsset={uploadAsset}
+              sceneQuery={sceneQuery}
+              onSceneQueryChange={setSceneQuery}
+              selectedSceneName={selectedSceneName}
+              onSelectedSceneNameChange={setSelectedSceneName}
+              filteredScenes={filteredScenes}
+              selectedBackgroundAssetId={selectedBackgroundAssetId}
+              onSelectedBackgroundAssetIdChange={setSelectedBackgroundAssetId}
+              backgroundAssetEntries={backgroundAssetEntries}
+              customSceneBgUrl={customSceneBgUrl}
+              onCustomSceneBgUrlChange={setCustomSceneBgUrl}
+              onPreviewSceneBackground={previewSceneBackground}
+              onApplySceneBackground={applySceneBackground}
+              onBindSceneUrl={bindSceneUrl}
+              onClearSceneBinding={clearSceneBinding}
+              currentBindingText={
+                selectedSceneName && sceneBgOverrides[selectedSceneName]
+                  ? `${sceneBgOverrides[selectedSceneName].source === "asset" ? "资源" : "URL"} · ${sceneBgOverrides[selectedSceneName].label}`
+                  : "未绑定"
+              }
+              assetQuery={assetQuery}
+              onAssetQueryChange={setAssetQuery}
+              assetFilter={assetFilter}
+              onAssetFilterChange={setAssetFilter}
+              onBatchRename={batchRenameResources}
+              bgmCount={bgmList.length}
+              sfxCount={sfxList.length}
+              resourceEntries={resourceEntries}
+              filteredResources={filteredResources}
+              onCopyResourceName={(value) => {
+                navigator.clipboard?.writeText(value).catch(() => undefined);
+                setAssetQuery(value);
+              }}
+            />
           </div>
 
           <div className={`panel ${activePanel === "save" ? "show" : ""}`}>
-            {savePanelContent}
+            <SavePanel
+              selectedSaveSlot={selectedSaveSlot}
+              onSelectedSaveSlotChange={setSelectedSaveSlot}
+              onSaveCurrentSlot={() => saveGame(selectedSaveSlot, true)}
+              onUpdateContinue={() => saveGame(selectedSaveSlot, false)}
+              saveSlots={saveSlots}
+              onSelectSlot={setSelectedSaveSlot}
+              onSaveSlot={(slotIndex) => saveGame(slotIndex, true)}
+              onLoadSlot={loadSaveSlot}
+              onDeleteSlot={deleteSaveSlot}
+              getSavedAtLabel={getSavedAtLabel}
+            />
           </div>
 
           <div className={`panel ${activePanel === "debug" ? "show" : ""}`}>
@@ -2392,7 +2230,7 @@ export function App() {
           </div>
 
           <div className={`panel ${activePanel === "settings" ? "show" : ""}`}>
-            {settingsPanelContent}
+            <SettingsPanel settings={settings} onChange={setSettings} onReset={() => setSettings(DEFAULT_SETTINGS)} />
             <div className="card">
               <div className="row">
                 <span className="label">场景信息</span>
