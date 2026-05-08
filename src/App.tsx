@@ -10,6 +10,24 @@ import {
 } from "./engine";
 import type { StageCharacter } from "./engine";
 import { AssetDB } from "./db";
+import {
+  DEFAULT_SETTINGS,
+  buildSaveSnapshot,
+  getSavedAtLabel,
+  normalizeManifest,
+  readJson,
+  readSaveSlots,
+  readSceneBgOverrides,
+  STORAGE_KEYS,
+  type AssetEntry,
+  type Manifest,
+  type SaveSlot,
+  type SceneBgOverride,
+  type Settings,
+  writeSaveSlots,
+  writeSceneBgOverrides,
+} from "./vnCore";
+import { ensureImageReady, queueImagePreload } from "./vnMedia";
 import appSource from "./App.tsx?raw";
 import mainSource from "./main.tsx?raw";
 import engineSource from "./engine.ts?raw";
@@ -25,55 +43,9 @@ import packageLockSource from "../package-lock.json?raw";
 import packageJsonSource from "../package.json?raw";
 import tsconfigSource from "../tsconfig.json?raw";
 import viteConfigSource from "../vite.config.ts?raw";
-
-const KEY_SETTINGS = "vn_settings_v1";
-const KEY_MANIFEST = "vn_manifest_v1";
-const KEY_SAVE = "vn_save_v1";
-const KEY_SAVE_SLOTS = "vn_save_slots_v1";
-const KEY_SCENE_BG_OVERRIDES = "vn_scene_bg_overrides_v1";
 const SAVE_SLOT_COUNT = 8;
-
-const DEFAULT_SETTINGS = {
-  typeMs: 18,
-  autoMs: 820,
-  dim: 18,
-  spriteW: 250,
-  spriteOpacity: 100,
-  bgScale: 104,
-  bgOpacity: 100,
-  spriteY: 0,
-  spriteX: 0,
-  bgmVol: 70,
-  sfxVol: 70,
-  uiSfxId: "",
-  uiAlpha: 60,
-};
-
-type Settings = typeof DEFAULT_SETTINGS;
 type GamePhase = "warning" | "title" | "playing" | "credits";
 type LogItem = { who: string; text: string };
-type AssetEntry = { id: string; label: string };
-type Manifest = {
-  backgrounds?: AssetEntry[];
-  bg?: AssetEntry[];
-  sprite?: AssetEntry[];
-  video?: AssetEntry[];
-  bgm?: AssetEntry[];
-  sfx?: AssetEntry[];
-};
-type SaveSlot = {
-  slot: number;
-  index: number;
-  log: LogItem[];
-  act: string;
-  scene: string;
-  speaker: string;
-  text: string;
-  bgmName: string;
-  savedAt: string;
-  progress: string;
-};
-type SceneBgOverride = { source: "asset" | "url"; value: string; label: string };
 type SfxLayer = "ui" | "scene" | "story" | "cg" | "emotion";
 
 const PAUSE_CHARS: Record<string, number> = {
@@ -108,10 +80,6 @@ const CREDITS_BLOCKS = [
 
 const TITLE_SCREEN_BG = "https://i.imgur.com/FAWl3AP.png";
 const CORNER_IMG_URL = "https://i.imgur.com/NVGVJiU.png";
-const IMAGE_READY_CACHE = new Map<string, Promise<void>>();
-const IMAGE_PREFETCH_QUEUE: string[] = [];
-const IMAGE_PREFETCH_LIMIT = 3;
-let IMAGE_PREFETCH_ACTIVE = 0;
 
 const QA_ITEMS = [
   { q: "1、为什么做这个？", a: "m成分占比太高" },
@@ -120,16 +88,6 @@ const QA_ITEMS = [
   { q: "4、这个故事有原型吗？", a: "难说" },
 ];
 
-function readJson<T extends Record<string, unknown>>(key: string, fallback: T): T {
-  try {
-    const raw = localStorage.getItem(key);
-    if (!raw) return fallback;
-    return { ...fallback, ...JSON.parse(raw) };
-  } catch {
-    return fallback;
-  }
-}
-
 function safeParse<T>(raw: string | null, fallback: T): T {
   if (!raw) return fallback;
   try {
@@ -137,16 +95,6 @@ function safeParse<T>(raw: string | null, fallback: T): T {
   } catch {
     return fallback;
   }
-}
-
-function normalizeManifest(manifest: Manifest): Manifest {
-  const backgrounds = [...(manifest.backgrounds || []), ...(manifest.bg || [])];
-  const dedupedBackgrounds = Array.from(new Map(backgrounds.map((item) => [item.id, item])).values());
-  const { bg: _legacyBg, ...rest } = manifest;
-  return {
-    ...rest,
-    backgrounds: dedupedBackgrounds,
-  };
 }
 
 function findBestAssetMatch(items: AssetEntry[] | undefined, queries: string[]) {
@@ -170,39 +118,6 @@ function collectScriptScenes() {
 
 const SCRIPT_SCENES = collectScriptScenes();
 
-function readSaveSlots(): Array<SaveSlot | null> {
-  const slots = safeParse<Array<SaveSlot | null>>(localStorage.getItem(KEY_SAVE_SLOTS), []);
-  return Array.from({ length: SAVE_SLOT_COUNT }, (_, idx) => slots[idx] || null);
-}
-
-function readSceneBgOverrides(): Record<string, SceneBgOverride> {
-  return safeParse<Record<string, SceneBgOverride>>(localStorage.getItem(KEY_SCENE_BG_OVERRIDES), {});
-}
-
-function writeSaveSlots(slots: Array<SaveSlot | null>) {
-  localStorage.setItem(KEY_SAVE_SLOTS, JSON.stringify(slots.slice(0, SAVE_SLOT_COUNT)));
-}
-
-function writeSceneBgOverrides(overrides: Record<string, SceneBgOverride>) {
-  localStorage.setItem(KEY_SCENE_BG_OVERRIDES, JSON.stringify(overrides));
-}
-
-function buildSaveSnapshot(index: number, log: LogItem[], currentAct: string, currentBgmName: string): SaveSlot {
-  const curLine = SCRIPT.lines[index];
-  return {
-    slot: 0,
-    index,
-    log: log.slice(-100),
-    act: currentAct || curLine?.act || "",
-    scene: curLine?.scene || "",
-    speaker: curLine?.speaker || "",
-    text: curLine?.text || "",
-    bgmName: currentBgmName || "",
-    savedAt: new Date().toISOString(),
-    progress: `${Math.min(index + 1, SCRIPT.lines.length)}/${SCRIPT.lines.length}`,
-  };
-}
-
 function getLineTypingDelay(text: string, index: number, baseMs: number) {
   const char = text[index - 1] || "";
   let delay = baseMs * (PAUSE_CHARS[char] || 1);
@@ -222,15 +137,6 @@ function getLineTypingDelay(text: string, index: number, baseMs: number) {
   return Math.max(10, Math.min(240, delay));
 }
 
-function getSavedAtLabel(savedAt: string) {
-  if (!savedAt) return "未记录";
-  try {
-    return new Date(savedAt).toLocaleString();
-  } catch {
-    return savedAt;
-  }
-}
-
 function getBgmMoodClass(name: string): string {
   if (!name) return "bgm-neutral";
   if (/(悬疑|压抑|紧张|高潮|审判|恐怖)/.test(name)) return "bgm-tense";
@@ -248,55 +154,6 @@ function getCodeFenceLanguage(path: string): string {
   if (path.endsWith(".md")) return "md";
   if (path.endsWith(".d.ts")) return "ts";
   return "text";
-}
-
-function ensureImageReady(url: string): Promise<void> {
-  const cached = IMAGE_READY_CACHE.get(url);
-  if (cached) return cached;
-
-  const promise = new Promise<void>((resolve) => {
-    const img = new Image();
-    img.decoding = "async";
-    img.loading = "eager";
-    const finish = () => {
-      if (typeof img.decode === "function") {
-        void img.decode().catch(() => undefined).finally(resolve);
-        return;
-      }
-      resolve();
-    };
-    img.onload = finish;
-    img.onerror = () => resolve();
-    img.src = url;
-    if (img.complete && img.naturalWidth > 0) {
-      finish();
-    }
-  });
-
-  IMAGE_READY_CACHE.set(url, promise);
-  return promise;
-}
-
-function pumpImagePreloadQueue() {
-  while (IMAGE_PREFETCH_ACTIVE < IMAGE_PREFETCH_LIMIT && IMAGE_PREFETCH_QUEUE.length > 0) {
-    const url = IMAGE_PREFETCH_QUEUE.shift();
-    if (!url || IMAGE_READY_CACHE.has(url)) continue;
-    IMAGE_PREFETCH_ACTIVE += 1;
-    void ensureImageReady(url).finally(() => {
-      IMAGE_PREFETCH_ACTIVE = Math.max(0, IMAGE_PREFETCH_ACTIVE - 1);
-      pumpImagePreloadQueue();
-    });
-  }
-}
-
-function preloadImage(url: string | null | undefined) {
-  if (!url || IMAGE_READY_CACHE.has(url) || IMAGE_PREFETCH_QUEUE.includes(url)) return;
-  IMAGE_PREFETCH_QUEUE.push(url);
-  pumpImagePreloadQueue();
-}
-
-function queueImagePreload(url: string | null | undefined) {
-  preloadImage(url);
 }
 
 const RainCanvas = memo(function RainCanvas({
@@ -538,7 +395,7 @@ const FloatingBgm = memo(function FloatingBgm({
 
 export function App() {
   const [index, setIndex] = useState(0);
-  const [settings, setSettings] = useState<Settings>(() => readJson(KEY_SETTINGS, DEFAULT_SETTINGS));
+  const [settings, setSettings] = useState<Settings>(() => readJson(STORAGE_KEYS.settings, DEFAULT_SETTINGS));
   const [phase, setPhase] = useState<GamePhase>("warning");
   const [log, setLog] = useState<LogItem[]>([]);
   const [showLog, setShowLog] = useState(false);
@@ -579,11 +436,13 @@ export function App() {
   const [creditsRollReady, setCreditsRollReady] = useState(false);
   const [showQaPanel, setShowQaPanel] = useState(false);
   const [openQaIndex, setOpenQaIndex] = useState<number | null>(null);
-  const [saveSlots, setSaveSlots] = useState<Array<SaveSlot | null>>(() => readSaveSlots());
+  const [saveSlots, setSaveSlots] = useState<Array<SaveSlot | null>>(() => readSaveSlots(SAVE_SLOT_COUNT));
   const [selectedSaveSlot, setSelectedSaveSlot] = useState(0);
   const [assetQuery, setAssetQuery] = useState("");
   const [assetFilter, setAssetFilter] = useState<keyof Manifest | "all">("all");
-  const [manifestState, setManifestState] = useState<Manifest>(() => normalizeManifest(safeParse<Manifest>(localStorage.getItem(KEY_MANIFEST), {})));
+  const [manifestState, setManifestState] = useState<Manifest>(() =>
+    normalizeManifest(readJson<Manifest>(STORAGE_KEYS.manifest, {})),
+  );
   const [sceneBgOverrides, setSceneBgOverrides] = useState<Record<string, SceneBgOverride>>(() => readSceneBgOverrides());
   const [sceneQuery, setSceneQuery] = useState("");
   const [selectedSceneName, setSelectedSceneName] = useState("");
@@ -823,12 +682,12 @@ export function App() {
     root.setProperty("--ui-alpha", `${0.05 + settings.uiAlpha / 420}`);
     bgmRef.current.volume = settings.bgmVol / 100;
     sfxRef.current.volume = settings.sfxVol / 100;
-    localStorage.setItem(KEY_SETTINGS, JSON.stringify(settings));
+    localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify(settings));
   }, [settings]);
 
   const refreshBgmList = useCallback(() => {
     try {
-      const manifest = normalizeManifest(safeParse<Manifest>(localStorage.getItem(KEY_MANIFEST), {}));
+      const manifest = normalizeManifest(readJson<Manifest>(STORAGE_KEYS.manifest, {}));
       setManifestState(manifest);
       setBgmList(manifest.bgm || []);
       setSfxList(manifest.sfx || []);
@@ -844,7 +703,7 @@ export function App() {
   }, [refreshBgmList]);
 
   useEffect(() => {
-    setSaveSlots(readSaveSlots());
+    setSaveSlots(readSaveSlots(SAVE_SLOT_COUNT));
   }, []);
 
   useEffect(() => {
@@ -1258,15 +1117,18 @@ export function App() {
 
   const commitSaveSlot = useCallback(
     (slotIndex: number) => {
-      const data = { ...buildSaveSnapshot(index, log, currentAct, currentBgmName), slot: slotIndex };
-      const nextSlots = readSaveSlots();
+      const data = {
+        ...buildSaveSnapshot(index, log, currentAct, currentBgmName, curLine, SCRIPT.lines.length),
+        slot: slotIndex,
+      };
+      const nextSlots = readSaveSlots(SAVE_SLOT_COUNT);
       nextSlots[slotIndex] = data;
-      writeSaveSlots(nextSlots);
+      writeSaveSlots(nextSlots, SAVE_SLOT_COUNT);
       setSaveSlots(nextSlots);
-      localStorage.setItem(KEY_SAVE, JSON.stringify(data));
+      localStorage.setItem(STORAGE_KEYS.save, JSON.stringify(data));
       return data;
     },
-    [currentAct, currentBgmName, index, log],
+    [currentAct, currentBgmName, curLine, index, log],
   );
 
   const saveGame = useCallback(
@@ -1274,12 +1136,12 @@ export function App() {
       if (persistSlot) {
         commitSaveSlot(slotIndex);
       } else {
-        const data = buildSaveSnapshot(index, log, currentAct, currentBgmName);
-        localStorage.setItem(KEY_SAVE, JSON.stringify(data));
+        const data = buildSaveSnapshot(index, log, currentAct, currentBgmName, curLine, SCRIPT.lines.length);
+        localStorage.setItem(STORAGE_KEYS.save, JSON.stringify(data));
       }
       pulseUi("ui");
     },
-    [commitSaveSlot, currentAct, currentBgmName, index, log, pulseUi, selectedSaveSlot],
+    [commitSaveSlot, currentAct, currentBgmName, curLine, index, log, pulseUi, selectedSaveSlot],
   );
 
   const loadSaveSlot = useCallback(
@@ -1313,7 +1175,7 @@ export function App() {
   );
 
   const continueLastGame = useCallback(() => {
-    const lastSave = safeParse<SaveSlot | null>(localStorage.getItem(KEY_SAVE), null);
+    const lastSave = safeParse<SaveSlot | null>(localStorage.getItem(STORAGE_KEYS.save), null);
     if (!lastSave) return;
     setPhase("playing");
     setIndex(Math.min(SCRIPT.lines.length - 1, lastSave.index));
@@ -1341,9 +1203,9 @@ export function App() {
 
   const deleteSaveSlot = useCallback(
     (slotIndex: number) => {
-      const nextSlots = readSaveSlots();
+      const nextSlots = readSaveSlots(SAVE_SLOT_COUNT);
       nextSlots[slotIndex] = null;
-      writeSaveSlots(nextSlots);
+      writeSaveSlots(nextSlots, SAVE_SLOT_COUNT);
       setSaveSlots(nextSlots);
       pulseUi("ui");
     },
@@ -1512,10 +1374,10 @@ export function App() {
       const id = `${kind}_${crypto.randomUUID()}`;
       await AssetDB.put(AssetDB.STORE_ASSETS, id, file);
       try {
-        const manifest = normalizeManifest(safeParse<Manifest>(localStorage.getItem(KEY_MANIFEST), {}));
+        const manifest = normalizeManifest(readJson<Manifest>(STORAGE_KEYS.manifest, {}));
         const key = kind === "bg" ? "backgrounds" : kind;
-        manifest[key] = [ { id, label }, ...((manifest[key] || []) as AssetEntry[]) ];
-        localStorage.setItem(KEY_MANIFEST, JSON.stringify(manifest));
+        manifest[key] = [{ id, label }, ...((manifest[key] || []) as AssetEntry[])];
+        localStorage.setItem(STORAGE_KEYS.manifest, JSON.stringify(manifest));
         refreshBgmList();
       } catch {
         // ignore
@@ -1694,7 +1556,7 @@ export function App() {
   const bgmMoodClass = getBgmMoodClass(currentBgmLabel);
   const sceneProgress = `${Math.min(index + 1, SCRIPT.lines.length)}/${SCRIPT.lines.length}`;
   const titlePanelOpen = phase === "title" && (activePanel === "settings" || activePanel === "assets");
-  const hasContinueSave = Boolean(localStorage.getItem(KEY_SAVE));
+  const hasContinueSave = Boolean(localStorage.getItem(STORAGE_KEYS.save));
   const resourceEntries = Object.entries(manifestState).flatMap(([kind, items]) =>
     (items || []).map((item) => ({
       ...item,
@@ -1902,7 +1764,7 @@ export function App() {
               (["backgrounds", "sprite", "video", "bgm", "sfx"] as const).forEach((kind) => {
                 updated[kind] = (updated[kind] || []).map((item, idx) => ({ ...item, label: `${next}-${idx + 1}` }));
               });
-              localStorage.setItem(KEY_MANIFEST, JSON.stringify(updated));
+              localStorage.setItem(STORAGE_KEYS.manifest, JSON.stringify(updated));
               setManifestState(updated);
               refreshBgmList();
             }}
