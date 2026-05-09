@@ -59,7 +59,6 @@ import viteConfigSource from "../vite.config.ts?raw";
 const SAVE_SLOT_COUNT = 8;
 type GamePhase = "warning" | "title" | "playing" | "credits";
 type LogItem = { who: string; text: string };
-type SfxLayer = "ui" | "scene" | "story" | "cg" | "emotion";
 
 const PAUSE_CHARS: Record<string, number> = {
   "。": 6,
@@ -177,7 +176,7 @@ const RainCanvas = memo(function RainCanvas({
     };
 
     resize();
-    for (let i = 0; i < (lowPerfMode ? 88 : 150); i += 1) {
+    for (let i = 0; i < (lowPerfMode ? 40 : 88); i += 1) {
       drops.push({
         x: Math.random() * width,
         y: Math.random() * height,
@@ -188,7 +187,7 @@ const RainCanvas = memo(function RainCanvas({
     }
 
     let frameId = 0;
-    const frameInterval = 1000 / (lowPerfMode ? 24 : 40);
+    const frameInterval = 1000 / (lowPerfMode ? 18 : 30);
     const handleVisibility = () => {
       isPageVisible = document.visibilityState === "visible";
     };
@@ -274,7 +273,7 @@ const DustCanvas = memo(function DustCanvas({
     };
 
     resize();
-    for (let i = 0; i < (lowPerfMode ? 36 : 72); i += 1) {
+    for (let i = 0; i < (lowPerfMode ? 18 : 40); i += 1) {
       points.push({
         x: Math.random() * width,
         y: Math.random() * height,
@@ -286,7 +285,7 @@ const DustCanvas = memo(function DustCanvas({
     }
 
     let frameId = 0;
-    const frameInterval = 1000 / (lowPerfMode ? 18 : 28);
+    const frameInterval = 1000 / (lowPerfMode ? 12 : 22);
     const handleVisibility = () => {
       isPageVisible = document.visibilityState === "visible";
     };
@@ -463,7 +462,6 @@ export function useVnRuntime() {
   const cgVideoUrlRef = useRef("");
   const cgVideoRef = useRef<HTMLVideoElement>(null);
   const bgAssetUrlCacheRef = useRef<Record<string, string>>({});
-  const audioCtxRef = useRef<AudioContext | null>(null);
   const cgCloseTimerRef = useRef<number | null>(null);
   const preludeTimerRef = useRef<number | null>(null);
   const uiPulseRef = useRef<number | null>(null);
@@ -551,68 +549,14 @@ export function useVnRuntime() {
     return () => window.clearTimeout(timer);
   }, [lowPerfMode, phase]);
 
-  const ensureAudioContext = useCallback(() => {
-    if (audioCtxRef.current) return audioCtxRef.current;
-    const Ctor = window.AudioContext || (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
-    if (!Ctor) return null;
-    audioCtxRef.current = new Ctor();
-    return audioCtxRef.current;
-  }, []);
-
-  const playLayerTone = useCallback(
-    (layer: SfxLayer) => {
-      if (settings.sfxVol <= 0) return;
-      const ctx = ensureAudioContext();
-      if (!ctx) return;
-      if (ctx.state === "suspended") {
-        void ctx.resume().catch(() => undefined);
-      }
-
-      const master = ctx.createGain();
-      const filter = ctx.createBiquadFilter();
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      const vol = settings.sfxVol / 100;
-      const now = ctx.currentTime;
-      const config: Record<SfxLayer, { type: OscillatorType; base: number; peak: number; dur: number; q: number }> = {
-        ui: { type: "triangle", base: 640, peak: 920, dur: 0.08, q: 0.75 },
-        scene: { type: "sine", base: 260, peak: 380, dur: 0.16, q: 0.9 },
-        story: { type: "triangle", base: 180, peak: 300, dur: 0.24, q: 0.82 },
-        cg: { type: "sine", base: 120, peak: 220, dur: 0.36, q: 0.7 },
-        emotion: { type: "square", base: 320, peak: 540, dur: 0.28, q: 1.1 },
-      };
-      const item = config[layer];
-      master.gain.setValueAtTime(vol * 0.22, now);
-      master.gain.exponentialRampToValueAtTime(vol * 0.04, now + item.dur);
-      filter.type = layer === "cg" ? "lowpass" : "bandpass";
-      filter.frequency.setValueAtTime(item.base, now);
-      filter.frequency.exponentialRampToValueAtTime(item.peak, now + item.dur * 0.55);
-      filter.Q.value = item.q;
-      osc.type = item.type;
-      osc.frequency.setValueAtTime(item.base, now);
-      osc.frequency.exponentialRampToValueAtTime(item.peak, now + item.dur * 0.32);
-      osc.connect(filter);
-      filter.connect(gain);
-      gain.connect(master);
-      master.connect(ctx.destination);
-      gain.gain.setValueAtTime(0.001, now);
-      gain.gain.exponentialRampToValueAtTime(0.9, now + 0.015);
-      gain.gain.exponentialRampToValueAtTime(0.001, now + item.dur);
-      osc.start(now);
-      osc.stop(now + item.dur + 0.02);
-    },
-    [ensureAudioContext, settings.sfxVol],
-  );
-
   const pulseUi = useCallback(
-    (layer: SfxLayer = "ui") => {
+    (_kind?: string) => {
       if (uiPulseRef.current) window.clearTimeout(uiPulseRef.current);
-      playLayerTone(layer);
       uiPulseRef.current = window.setTimeout(() => {
         uiPulseRef.current = null;
       }, 120);
     },
-    [playLayerTone],
+    [],
   );
 
   const ensureBackgroundAssetUrl = useCallback(async (assetId: string) => {
@@ -739,8 +683,6 @@ export function useVnRuntime() {
     root.setProperty("--sprite-y", `${settings.spriteY}px`);
     root.setProperty("--sprite-x", `${settings.spriteX}px`);
     root.setProperty("--ui-alpha", `${0.05 + settings.uiAlpha / 420}`);
-    bgmRef.current.volume = settings.bgmVol / 100;
-    sfxRef.current.volume = settings.sfxVol / 100;
     localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify(settings));
   }, [settings]);
 
@@ -808,7 +750,7 @@ export function useVnRuntime() {
   useEffect(() => {
     if (phase !== "playing") return;
     const upcoming = new Set<string>();
-    for (let i = index; i < Math.min(SCRIPT.lines.length, index + 8); i += 1) {
+    for (let i = index; i < Math.min(SCRIPT.lines.length, index + 4); i += 1) {
       upcoming.add(resolveSceneBackground(SCRIPT.lines[i]?.scene));
       const line = SCRIPT.lines[i];
       if (!line) continue;
@@ -972,7 +914,7 @@ export function useVnRuntime() {
     if (phase !== "playing" || !curLine) return;
     setStageChars(getSceneCharacters(SCRIPT.lines, index, curLine.speaker));
     const upcoming = new Set<string>();
-    for (let i = index; i < Math.min(SCRIPT.lines.length, index + 6); i += 1) {
+      for (let i = index; i < Math.min(SCRIPT.lines.length, index + 3); i += 1) {
       const line = SCRIPT.lines[i];
       if (!line) continue;
       getSceneCharacters(SCRIPT.lines, i, line.speaker).forEach((ch) => {
@@ -1612,7 +1554,6 @@ export function useVnRuntime() {
       if (cgCloseTimerRef.current) window.clearTimeout(cgCloseTimerRef.current);
       if (preludeTimerRef.current) window.clearTimeout(preludeTimerRef.current);
       if (uiPulseRef.current) window.clearTimeout(uiPulseRef.current);
-      audioCtxRef.current?.close().catch(() => undefined);
     };
   }, []);
 
