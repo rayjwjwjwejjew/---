@@ -415,7 +415,6 @@ export function useVnRuntime() {
   const [textVisible, setTextVisible] = useState(true);
   const [cgVisible, setCgVisible] = useState(false);
   const [cgClosing, setCgClosing] = useState(false);
-  const [cgTitle, setCgTitle] = useState("");
   const [cgMediaKind, setCgMediaKind] = useState<"image" | "video">("image");
   const [cgImageUrl, setCgImageUrl] = useState("");
   const [cgVideoUrl, setCgVideoUrl] = useState("");
@@ -840,7 +839,6 @@ export function useVnRuntime() {
       cgCloseTimerRef.current = null;
     }
     if (phase !== "playing" || !curLine?.cg || cgVisible) return;
-    setCgTitle(curLine.cg);
     const cgKey = `${index}:${curLine.cg}`;
     if (cgSeenRef.current === cgKey) return;
     let cancelled = false;
@@ -1228,7 +1226,7 @@ export function useVnRuntime() {
 
   const closeCg = useCallback(() => {
     if (!cgVisible) return;
-    cgSeenRef.current = `${index}:${curLine?.cg || cgTitle}`;
+    cgSeenRef.current = `${index}:${curLine?.cg || ""}`;
     setCgClosing(true);
     pulseUi("cg");
     if (cgCloseTimerRef.current) window.clearTimeout(cgCloseTimerRef.current);
@@ -1243,7 +1241,7 @@ export function useVnRuntime() {
       setCgVideoUrl("");
       cgCloseTimerRef.current = null;
     }, 240);
-  }, [cgVisible, cgTitle, curLine?.cg, index, pulseUi]);
+  }, [cgVisible, curLine?.cg, index, pulseUi]);
 
   const triggerOpeningPrelude = useCallback((text: string) => {
     if (preludeTimerRef.current) window.clearTimeout(preludeTimerRef.current);
@@ -2005,34 +2003,22 @@ export function useVnRuntime() {
 
           {cgVisible && (
             <div className={`cg-overlay ${cgClosing ? "closing" : "showing"}`} onClick={closeCg}>
-              <div className="cg-panel" onClick={(event) => event.stopPropagation()}>
-                <div className="cg-header">
-                  <div className="cg-kicker">{cgMediaKind === "video" ? "VIDEO CG · 镜头展开" : "CG · 镜头展开"}</div>
-                  <div className="cg-title">{cgTitle}</div>
-                </div>
-                <div className="cg-media" style={{ backgroundImage: `url("${cgImageUrl}")` }}>
-                  {cgMediaKind === "video" ? (
-                    <video
-                      ref={cgVideoRef}
-                      className="cg-video"
-                      src={cgVideoUrl}
-                      autoPlay
-                      playsInline
-                      controls={false}
-                      muted={lowPerfMode}
-                      onEnded={() => closeCg()}
-                      onError={() => setCgMediaKind("image")}
-                    />
-                  ) : (
-                    <div className="cg-art" style={{ backgroundImage: `url("${cgImageUrl}")` }} />
-                  )}
-                </div>
-                <div className="cg-meta">
-                  <div className="cg-caption">{cgMediaKind === "video" ? "视频 CG 播放中，按空格或点击收束镜头" : "按空格或点击收束镜头"}</div>
-                  <button className="btn cg-close" onClick={closeCg}>
-                    继续
-                  </button>
-                </div>
+              <div className="cg-stage" onClick={(event) => event.stopPropagation()}>
+                {cgMediaKind === "video" ? (
+                  <video
+                    ref={cgVideoRef}
+                    className="cg-screen"
+                    src={cgVideoUrl}
+                    autoPlay
+                    playsInline
+                    controls={false}
+                    muted={lowPerfMode}
+                    onEnded={() => closeCg()}
+                    onError={() => setCgMediaKind("image")}
+                  />
+                ) : (
+                  <div className="cg-screen cg-art" style={{ backgroundImage: `url("${cgImageUrl}")` }} />
+                )}
               </div>
             </div>
           )}
@@ -2165,7 +2151,6 @@ export function useVnRuntime() {
               }}
               onTriggerCg={() => {
                 if (!curLine) return;
-                setCgTitle(curLine.cg || "调试 CG");
                 setCgImageUrl(bgUrl || DEFAULT_BG);
                 setCgVisible(true);
                 pulseUi("cg");
