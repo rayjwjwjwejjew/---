@@ -368,11 +368,6 @@ const FloatingBgm = memo(function FloatingBgm({
     <div className={`bgm-indicator ${moodClass}`}>
       <div className="bgm-indicator-eyebrow">{muted ? "BGM 已静音" : playing ? "正在播放" : "BGM 待机"}</div>
       <div className="bgm-indicator-main">
-        <span className="bgm-eq" aria-hidden="true">
-          <span />
-          <span />
-          <span />
-        </span>
         <span className="bgm-indicator-text">{label}</span>
       </div>
     </div>
