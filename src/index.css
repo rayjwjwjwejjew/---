@@ -1570,11 +1570,11 @@ textarea {
   padding: 0;
   background: rgba(5, 5, 8, 0.94);
   backdrop-filter: none;
-  animation: cgOverlayIn 0.24s ease;
+  animation: cgOverlayIn 0.16s ease;
 }
 
 .cg-overlay.closing {
-  animation: cgOverlayOut 0.24s ease forwards;
+  animation: cgOverlayOut 0.16s ease forwards;
 }
 
 .cg-stage {
@@ -1591,7 +1591,7 @@ textarea {
   height: 100%;
   background: center / cover no-repeat;
   transform-origin: center;
-  animation: cgScreenIn 0.32s ease both;
+  animation: cgScreenIn 0.2s ease both;
 }
 
 .cg-art::after {
@@ -1634,10 +1634,10 @@ textarea {
 @keyframes cgScreenIn {
   0% {
     opacity: 0.1;
-    transform: scale(1.02);
-    filter: blur(1px) saturate(0.96);
+    transform: scale(1.008);
+    filter: blur(0.5px) saturate(0.98);
   }
-  55% {
+  60% {
     opacity: 1;
     transform: scale(1);
     filter: blur(0) saturate(1.01);
@@ -1647,6 +1647,17 @@ textarea {
     transform: scale(1);
     filter: blur(0) saturate(1.02);
   }
+}
+
+#app-root.low-perf .cg-screen,
+#app-root.low-perf .cg-art {
+  animation-duration: 0.01s;
+  filter: none;
+}
+
+#app-root.low-perf .cg-overlay,
+#app-root.low-perf .cg-overlay.closing {
+  animation-duration: 0.08s;
 }
 
 #text {
