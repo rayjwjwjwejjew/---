@@ -1,4 +1,5 @@
 :root {
+  --title-bg-url: url("/scene-bg/school-exterior.png");
   --ui-bg: rgba(20, 16, 24, 0.68);
   --ui-stroke: rgba(255, 255, 255, 0.18);
   --ui-stroke-2: rgba(255, 255, 255, 0.12);
@@ -205,10 +206,10 @@ textarea {
 .title-bg {
   position: absolute;
   inset: -30px;
-  background-image: url("./scene-bg/school-exterior.png");
+  background-image: var(--title-bg-url);
   background-size: cover;
   background-position: center;
-  filter: blur(4px) brightness(0.48) saturate(1.06);
+  filter: blur(4px) brightness(0.62) saturate(1.04);
   transform: scale(1.08);
   animation: titleBgSlow 28s ease-in-out infinite alternate;
 }
@@ -1108,7 +1109,7 @@ textarea {
 #dim {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, calc(var(--dim) * 0.55));
+  background: rgba(0, 0, 0, calc(var(--dim) * 0.38));
   z-index: 5;
   pointer-events: none;
 }

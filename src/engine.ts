@@ -728,7 +728,7 @@ const BG = {
   basketballCourt: basketballCourtScene(),
 } as const;
 
-const PUBLIC_BG_BASE = "./scene-bg/";
+const PUBLIC_BG_BASE = `${import.meta.env.BASE_URL}scene-bg/`;
 
 const LOCAL_BG = {
   schoolExterior: `${PUBLIC_BG_BASE}school-exterior.png`,

@@ -90,7 +90,7 @@ const CREDITS_BLOCKS = [
   { role: "剧情测试", names: "Ray、Justin" },
 ];
 
-const TITLE_SCREEN_BG = "./scene-bg/school-exterior.png";
+const TITLE_SCREEN_BG = `${import.meta.env.BASE_URL}scene-bg/school-exterior.png`;
 const CORNER_IMG_URL = "https://i.imgur.com/NVGVJiU.png";
 
 const QA_ITEMS = [
@@ -655,6 +655,7 @@ export function useVnRuntime() {
     root.setProperty("--sprite-y", `${settings.spriteY}px`);
     root.setProperty("--sprite-x", `${settings.spriteX}px`);
     root.setProperty("--ui-alpha", `${0.05 + settings.uiAlpha / 420}`);
+    root.setProperty("--title-bg-url", `url("${TITLE_SCREEN_BG}")`);
     localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify(settings));
   }, [settings]);
 
