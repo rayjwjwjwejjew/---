@@ -37,9 +37,15 @@ import {
   filterResourceEntries,
   filterSceneNames,
   findBestAssetMatch,
+  getCgCaption,
+  getChoiceTone,
+  getChoiceToneLabel,
+  getDialogueKicker,
+  getDialogueTone,
   getBgmMoodClass,
   getCurrentBgmLabel,
   getSceneProgress,
+  isEmphasisLine,
 } from "./vnDerived";
 import appSource from "./App.tsx?raw";
 import mainSource from "./main.tsx?raw";
@@ -1546,6 +1552,10 @@ export function useVnRuntime() {
   const speaker = curLine?.speaker;
   const showName = Boolean(speaker && speaker !== "旁白" && speaker !== "SYSTEM");
   const speakerColor = speaker ? CHARACTER_COLORS[speaker] || "rgba(255,241,248,0.96)" : "rgba(255,241,248,0.96)";
+  const dialogueTone = getDialogueTone(curLine);
+  const dialogueKicker = getDialogueKicker(dialogueTone);
+  const emphasisLine = isEmphasisLine(curLine?.text);
+  const cgCaption = getCgCaption(currentAct, curLine);
   const currentBgmLabel = useMemo(
     () => getCurrentBgmLabel(bgmList, currentBgmId, currentBgmName),
     [bgmList, currentBgmId, currentBgmName],
@@ -1564,6 +1574,23 @@ export function useVnRuntime() {
   const filteredResources = useMemo(
     () => filterResourceEntries(resourceEntries, assetQuery, assetFilter),
     [assetFilter, assetQuery, resourceEntries],
+  );
+  const getSavePreview = useCallback(
+    (slot: SaveSlot | null, slotIndex: number) => {
+      if (!slot) {
+        return {
+          imageUrl: TITLE_SCREEN_BG,
+          location: `EMPTY SLOT ${String(slotIndex + 1).padStart(2, "0")}`,
+          excerpt: "这一格还没有被写入。后面我们可以在关键节点留下专属回忆。",
+        };
+      }
+      return {
+        imageUrl: resolveSceneBackground(slot.scene) || TITLE_SCREEN_BG,
+        location: slot.scene || slot.act || "未命名场景",
+        excerpt: slot.text ? (slot.text.length > 44 ? `${slot.text.slice(0, 44)}…` : slot.text) : "……",
+      };
+    },
+    [resolveSceneBackground],
   );
   const resourcePageCount = useMemo(
     () => Math.max(1, Math.ceil(filteredResources.length / 12)),
@@ -1963,7 +1990,7 @@ export function useVnRuntime() {
       )}
 
       {phase === "playing" && (
-        <PlayingScene className={`game-screen ${effectClasses} ${bgmMoodClass}`}>
+        <PlayingScene className={`game-screen ${effectClasses} ${bgmMoodClass} ${curLine?.kind === "choice" ? "choice-active" : ""}`.trim()}>
           <div className={`bg-container ${transitionActive ? "cinematic" : ""}`}>
             {prevBgUrl && transitionActive && transitionType === "dissolve" && (
               <div className="bg-layer bg-prev bg-cinematic-prev" style={{ backgroundImage: `url("${prevBgUrl}")` }} />
@@ -2000,6 +2027,12 @@ export function useVnRuntime() {
                   />
                 ) : (
                   <div className="cg-screen cg-art" style={{ backgroundImage: `url("${cgImageUrl}")` }} />
+                )}
+                {cgCaption && (
+                  <div className={`cg-caption ${cgMediaKind === "video" ? "video" : "image"}`}>
+                    <div className="cg-caption-label">{cgCaption.label}</div>
+                    <div className="cg-caption-copy">{cgCaption.copy}</div>
+                  </div>
                 )}
               </div>
             </div>
@@ -2105,6 +2138,7 @@ export function useVnRuntime() {
               onSaveCurrentSlot={() => saveGame(selectedSaveSlot, true)}
               onUpdateContinue={() => saveGame(selectedSaveSlot, false)}
               saveSlots={saveSlots}
+              getSavePreview={getSavePreview}
               onSelectSlot={setSelectedSaveSlot}
               onSaveSlot={(slotIndex) => saveGame(slotIndex, true)}
               onLoadSlot={loadSaveSlot}
@@ -2214,9 +2248,14 @@ export function useVnRuntime() {
           <div id="hud" style={{ display: curLine ? "block" : "none" }}>
             <div
               id="box"
-              className={`${!typing && curLine?.kind !== "choice" ? "can-advance" : ""} ${curLine?.kind === "choice" ? "choice-mode" : ""}`.trim()}
+              className={`${!typing && curLine?.kind !== "choice" ? "can-advance" : ""} ${curLine?.kind === "choice" ? "choice-mode" : ""} tone-${dialogueTone} ${emphasisLine ? "emphasis-line" : ""}`.trim()}
               onClick={() => { if (!curLine?.options) handleNext(); }}
             >
+              <div className="box-header">
+                <span className="box-code">CASE {String(index + 1).padStart(3, "0")}</span>
+                <span className="box-scene">{curLine?.scene || currentAct || "SCENE LOG"}</span>
+              </div>
+
               <div id="name" style={{ display: showName ? "flex" : "none" }}>
                 <span className="name-line-left" style={{ background: `linear-gradient(to right, transparent 0%, ${speakerColor} 100%)` }} />
                 <span className="name-text-inner" style={{ color: speakerColor, borderColor: speakerColor.replace("0.95", "0.32") }}>
@@ -2225,18 +2264,28 @@ export function useVnRuntime() {
                 <span className="name-line-right" style={{ background: `linear-gradient(to left, transparent 0%, ${speakerColor} 100%)` }} />
               </div>
 
-              <div id="text" className={`${textVisible ? "show" : "text-exit"}`}>
+              <div className={`text-kicker tone-${dialogueTone}`}>{dialogueKicker}</div>
+
+              <div id="text" className={`${textVisible ? "show" : "text-exit"} tone-${dialogueTone} ${emphasisLine ? "emphasis-line" : ""}`.trim()}>
                 {curLine?.kind === "choice" ? "请选择：" : displayedText}
               </div>
 
               <div id="choices" className={curLine?.kind === "choice" ? "show" : ""}>
                 {curLine?.kind === "choice" && <div className="choices-kicker">命运分歧</div>}
                 {curLine?.kind === "choice" &&
-                  curLine.options?.map((opt, idx) => (
-                    <button key={`${opt.text}_${idx}`} className="choice" onClick={(e) => { e.stopPropagation(); handleChoice(opt.cmd); }}>
-                      {opt.text}
-                    </button>
-                  ))}
+                  curLine.options?.map((opt, idx) => {
+                    const choiceTone = getChoiceTone(opt.text);
+                    return (
+                      <button
+                        key={`${opt.text}_${idx}`}
+                        className={`choice choice-${choiceTone}`}
+                        onClick={(e) => { e.stopPropagation(); handleChoice(opt.cmd); }}
+                      >
+                        <span className="choice-tone-label">{getChoiceToneLabel(choiceTone)}</span>
+                        <span>{opt.text}</span>
+                      </button>
+                    );
+                  })}
               </div>
 
               <div id="subline">

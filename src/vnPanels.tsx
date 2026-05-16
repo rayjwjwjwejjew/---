@@ -47,6 +47,7 @@ type SavePanelProps = {
   onSaveCurrentSlot: () => void;
   onUpdateContinue: () => void;
   saveSlots: Array<SaveSlot | null>;
+  getSavePreview: (slot: SaveSlot | null, index: number) => { imageUrl: string; location: string; excerpt: string } | null;
   onSelectSlot: (value: number) => void;
   onSaveSlot: (value: number) => void;
   onLoadSlot: (value: number) => void;
@@ -280,6 +281,7 @@ export function SavePanel({
   onSaveCurrentSlot,
   onUpdateContinue,
   saveSlots,
+  getSavePreview,
   onSelectSlot,
   onSaveSlot,
   onLoadSlot,
@@ -302,23 +304,42 @@ export function SavePanel({
         <div className="tiny">`仅更新继续` 会保留多槽存档，同时刷新标题页的“继续上次”。</div>
       </div>
       <div className="save-grid">
-        {saveSlots.map((slot, idx) => (
-          <div key={idx} className={`save-slot ${selectedSaveSlot === idx ? "selected" : ""}`}>
-            <div className="row save-slot-top">
-              <span className="label">槽位 {idx + 1}</span>
-              <span className="tiny mono">{slot ? slot.progress : "空槽"}</span>
+        {saveSlots.map((slot, idx) => {
+          const preview = getSavePreview(slot, idx);
+          return (
+            <div key={idx} className={`save-slot ${selectedSaveSlot === idx ? "selected" : ""}`}>
+              <div
+                className="save-slot-preview"
+                style={preview?.imageUrl ? { backgroundImage: `url("${preview.imageUrl}")` } : undefined}
+              >
+                <div className="save-slot-preview-noise" />
+                <div className="save-slot-preview-meta">
+                  <span className="save-slot-index">SLOT {String(idx + 1).padStart(2, "0")}</span>
+                  <span className="save-slot-location">{preview?.location || "未记录场景"}</span>
+                </div>
+              </div>
+
+              <div className="save-slot-body">
+                <div className="row save-slot-top">
+                  <span className="label">{slot ? slot.act || "未命名章节" : "空槽"}</span>
+                  <span className="tiny mono">{slot ? slot.progress : "EMPTY"}</span>
+                </div>
+                <div className="save-slot-speaker">{slot ? slot.speaker || "旁白" : "暂无记录"}</div>
+                <div className="save-slot-excerpt">{slot ? preview?.excerpt || slot.text || "……" : "点击保存后会写入这一格"}</div>
+                <div className="save-slot-foot">
+                  <span className="save-slot-time mono">{slot ? getSavedAtLabel(slot.savedAt) : "—"}</span>
+                  <span className="save-slot-scene-tag">{slot?.scene || "UNTRACKED"}</span>
+                </div>
+                <div className="row">
+                  <button className="btn" onClick={() => onSelectSlot(idx)}>选中</button>
+                  <button className="btn" onClick={() => onSaveSlot(idx)}>保存</button>
+                  <button className="btn" onClick={() => onLoadSlot(idx)} disabled={!slot}>读取</button>
+                  <button className="btn" onClick={() => onDeleteSlot(idx)} disabled={!slot}>删除</button>
+                </div>
+              </div>
             </div>
-            <div className="tiny">{slot ? slot.act || "未命名章节" : "尚未存档"}</div>
-            <div className="tiny">{slot ? `${slot.speaker || "旁白"} · ${slot.text || "……"}` : "点击保存后会写入这一格"}</div>
-            <div className="tiny mono">{slot ? getSavedAtLabel(slot.savedAt) : "—"}</div>
-            <div className="row">
-              <button className="btn" onClick={() => onSelectSlot(idx)}>选中</button>
-              <button className="btn" onClick={() => onSaveSlot(idx)}>保存</button>
-              <button className="btn" onClick={() => onLoadSlot(idx)} disabled={!slot}>读取</button>
-              <button className="btn" onClick={() => onDeleteSlot(idx)} disabled={!slot}>删除</button>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </>
   );
