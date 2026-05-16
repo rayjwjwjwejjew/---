@@ -90,7 +90,7 @@ const CREDITS_BLOCKS = [
   { role: "剧情测试", names: "Ray、Justin" },
 ];
 
-const TITLE_SCREEN_BG = `${import.meta.env.BASE_URL}scene-bg/school-exterior.png`;
+const TITLE_SCREEN_BG = "https://i.imgur.com/FAWl3AP.png";
 const CORNER_IMG_URL = "https://i.imgur.com/NVGVJiU.png";
 
 const QA_ITEMS = [
@@ -1203,7 +1203,7 @@ export function useVnRuntime() {
     [pulseUi],
   );
 
-  const closeCg = useCallback(() => {
+  const closeCg = useCallback((advance = false) => {
     if (!cgVisible) return;
     cgSeenRef.current = `${index}:${curLine?.cg || ""}`;
     setCgClosing(true);
@@ -1218,9 +1218,12 @@ export function useVnRuntime() {
       setCgClosing(false);
       setCgMediaKind("image");
       setCgVideoUrl("");
+      if (advance && phase === "playing") {
+        setIndex((value) => Math.min(SCRIPT.lines.length, value + 1));
+      }
       cgCloseTimerRef.current = null;
     }, 240);
-  }, [cgVisible, curLine?.cg, index, pulseUi]);
+  }, [cgVisible, curLine?.cg, index, phase, pulseUi]);
 
   const triggerOpeningPrelude = useCallback((text: string) => {
     if (preludeTimerRef.current) window.clearTimeout(preludeTimerRef.current);
@@ -1235,7 +1238,7 @@ export function useVnRuntime() {
   const handleNext = useCallback(() => {
     if (phase !== "playing" || !curLine) return;
     if (cgVisible) {
-      closeCg();
+      closeCg(true);
       return;
     }
     if (typing) {
@@ -1403,7 +1406,7 @@ export function useVnRuntime() {
       if (phase !== "playing") return;
       if (cgVisible && (event.key === " " || event.key === "Enter" || event.key === "Escape")) {
         event.preventDefault();
-        closeCg();
+        closeCg(true);
         return;
       }
       if ((event.key === " " || event.key === "Enter") && !activePanel && !showLog) {
@@ -1981,8 +1984,8 @@ export function useVnRuntime() {
           <div id="fx" />
 
           {cgVisible && (
-            <div className={`cg-overlay ${cgClosing ? "closing" : "showing"}`} onClick={closeCg}>
-              <div className="cg-stage" onClick={(event) => event.stopPropagation()}>
+            <div className={`cg-overlay ${cgClosing ? "closing" : "showing"}`} onClick={() => closeCg(true)}>
+              <div className="cg-stage">
                 {cgMediaKind === "video" ? (
                   <video
                     ref={cgVideoRef}
@@ -1992,7 +1995,7 @@ export function useVnRuntime() {
                     playsInline
                     controls={false}
                     muted={lowPerfMode}
-                    onEnded={() => closeCg()}
+                    onEnded={() => closeCg(true)}
                     onError={() => setCgMediaKind("image")}
                   />
                 ) : (
