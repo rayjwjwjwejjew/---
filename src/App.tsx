@@ -744,7 +744,7 @@ export function useVnRuntime() {
   useEffect(() => {
     if (phase !== "playing") return;
     const upcoming = new Set<string>();
-    for (let i = index; i < Math.min(SCRIPT.lines.length, index + 4); i += 1) {
+    for (let i = index; i < Math.min(SCRIPT.lines.length, index + 3); i += 1) {
       upcoming.add(resolveSceneBackground(SCRIPT.lines[i]?.scene));
       const line = SCRIPT.lines[i];
       if (!line) continue;
@@ -907,7 +907,7 @@ export function useVnRuntime() {
     if (phase !== "playing" || !curLine) return;
     setStageChars(getSceneCharacters(SCRIPT.lines, index, curLine.speaker));
     const upcoming = new Set<string>();
-      for (let i = index; i < Math.min(SCRIPT.lines.length, index + 3); i += 1) {
+    for (let i = index; i < Math.min(SCRIPT.lines.length, index + 2); i += 1) {
       const line = SCRIPT.lines[i];
       if (!line) continue;
       getSceneCharacters(SCRIPT.lines, i, line.speaker).forEach((ch) => {

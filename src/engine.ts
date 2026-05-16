@@ -728,21 +728,23 @@ const BG = {
   basketballCourt: basketballCourtScene(),
 } as const;
 
+const PUBLIC_BG_BASE = "./scene-bg/";
+
 const LOCAL_BG = {
-  schoolExterior: "/scene-bg/school-exterior.png",
-  schoolFront: "/scene-bg/school-front.png",
-  schoolInterior: "/scene-bg/school-interior.png",
-  classroomCorridor: "/scene-bg/classroom-corridor.png",
-  sportsFieldNight: "/scene-bg/sports-field-night.png",
-  basementDoor: "/scene-bg/basement-door.png",
-  basementDark: "/scene-bg/basement-dark.png",
-  dormRoom: "/scene-bg/dorm-room.png",
-  dormCommon: "/scene-bg/dorm-common.png",
-  hospitalRoom: "/scene-bg/hospital-room.png",
-  hospitalWaiting: "/scene-bg/hospital-waiting.jpg",
-  library: "/scene-bg/library.png",
-  rooftopSunset: "/scene-bg/rooftop-sunset.png",
-  teacherRoom: "/scene-bg/teacher-room.png",
+  schoolExterior: `${PUBLIC_BG_BASE}school-exterior.png`,
+  schoolFront: `${PUBLIC_BG_BASE}school-front.png`,
+  schoolInterior: `${PUBLIC_BG_BASE}school-interior.png`,
+  classroomCorridor: `${PUBLIC_BG_BASE}classroom-corridor.png`,
+  sportsFieldNight: `${PUBLIC_BG_BASE}sports-field-night.png`,
+  basementDoor: `${PUBLIC_BG_BASE}basement-door.png`,
+  basementDark: `${PUBLIC_BG_BASE}basement-dark.png`,
+  dormRoom: `${PUBLIC_BG_BASE}dorm-room.png`,
+  dormCommon: `${PUBLIC_BG_BASE}dorm-common.png`,
+  hospitalRoom: `${PUBLIC_BG_BASE}hospital-room.png`,
+  hospitalWaiting: `${PUBLIC_BG_BASE}hospital-waiting.jpg`,
+  library: `${PUBLIC_BG_BASE}library.png`,
+  rooftopSunset: `${PUBLIC_BG_BASE}rooftop-sunset.png`,
+  teacherRoom: `${PUBLIC_BG_BASE}teacher-room.png`,
 } as const;
 
 const STORY_SCENE_BG = LOCAL_BG.schoolExterior;
