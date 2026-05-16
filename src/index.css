@@ -78,7 +78,6 @@ textarea {
 }
 
 #app-root.low-perf #box,
-#app-root.low-perf .bgm-indicator,
 #app-root.low-perf .panel,
 #app-root.low-perf .cg-overlay,
 #app-root.low-perf .title-panel-shell,
@@ -206,10 +205,10 @@ textarea {
 .title-bg {
   position: absolute;
   inset: -30px;
-  background-image: url('https://i.imgur.com/FAWl3AP.jpg');
+  background-image: url("./scene-bg/school-exterior.png");
   background-size: cover;
   background-position: center;
-  filter: blur(5px) brightness(0.28) saturate(1.08);
+  filter: blur(4px) brightness(0.48) saturate(1.06);
   transform: scale(1.08);
   animation: titleBgSlow 28s ease-in-out infinite alternate;
 }
@@ -842,7 +841,7 @@ textarea {
     radial-gradient(circle at 30% 20%, rgba(255, 255, 255, 0.05), transparent 55%),
     radial-gradient(circle at 72% 66%, rgba(255, 255, 255, 0.04), transparent 58%);
   mix-blend-mode: overlay;
-  opacity: 0.7;
+  opacity: 0.28;
 }
 
 .bg-prev {
@@ -1109,7 +1108,7 @@ textarea {
 #dim {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, var(--dim));
+  background: rgba(0, 0, 0, calc(var(--dim) * 0.55));
   z-index: 5;
   pointer-events: none;
 }
@@ -1411,23 +1410,6 @@ textarea {
   }
 }
 
-.bgm-indicator {
-  position: absolute;
-  left: 30px;
-  bottom: calc(100% + 14px);
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
-  min-width: 184px;
-  max-width: min(300px, calc(100vw - 60px));
-  padding: 8px 12px;
-  border-radius: 15px;
-  border: 1px solid rgba(255, 241, 220, 0.1);
-  background: rgba(12, 10, 16, 0.5);
-  backdrop-filter: blur(6px);
-  box-shadow: 0 10px 22px rgba(0, 0, 0, 0.12);
-}
-
 .screen-flash {
   position: absolute;
   inset: 0;
@@ -1486,41 +1468,6 @@ textarea {
     opacity: 0;
     transform: scale(1.02);
   }
-}
-
-.bgm-indicator-eyebrow {
-  color: rgba(255, 235, 214, 0.54);
-  font-size: 10px;
-  letter-spacing: 0.3em;
-  text-transform: uppercase;
-}
-
-.bgm-indicator-main {
-  display: flex;
-  align-items: center;
-  gap: 0;
-}
-
-.bgm-indicator-text {
-  max-width: 100%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: rgba(255, 244, 236, 0.86);
-  font-size: 11px;
-  letter-spacing: 0.08em;
-}
-
-.bgm-indicator.bgm-soft {
-  color: rgba(241, 216, 177, 0.92);
-}
-
-.bgm-indicator.bgm-tense {
-  color: rgba(255, 165, 165, 0.92);
-}
-
-.bgm-indicator.bgm-neutral {
-  color: rgba(208, 220, 255, 0.9);
 }
 
 #name {
@@ -2341,13 +2288,6 @@ textarea {
   .resource-item,
   .debug-item {
     align-items: flex-start;
-  }
-
-  .bgm-indicator {
-    left: 16px;
-    bottom: calc(100% + 10px);
-    max-width: calc(100vw - 32px);
-    min-width: 0;
   }
 
   .name-text-inner {

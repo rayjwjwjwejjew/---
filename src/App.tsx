@@ -90,7 +90,7 @@ const CREDITS_BLOCKS = [
   { role: "剧情测试", names: "Ray、Justin" },
 ];
 
-const TITLE_SCREEN_BG = "https://i.imgur.com/FAWl3AP.png";
+const TITLE_SCREEN_BG = "./scene-bg/school-exterior.png";
 const CORNER_IMG_URL = "https://i.imgur.com/NVGVJiU.png";
 
 const QA_ITEMS = [
@@ -348,28 +348,6 @@ const StageSprites = memo(function StageSprites({
           style={{ backgroundImage: spriteReadyMap[ch.spriteUrl] ? `url("${ch.spriteUrl}")` : undefined }}
         />
       ))}
-    </div>
-  );
-});
-
-const FloatingBgm = memo(function FloatingBgm({
-  label,
-  playing,
-  muted,
-  moodClass,
-}: {
-  label: string;
-  playing: boolean;
-  muted: boolean;
-  moodClass: string;
-}) {
-  if (!label) return null;
-  return (
-    <div className={`bgm-indicator ${moodClass}`}>
-      <div className="bgm-indicator-eyebrow">{muted ? "BGM 已静音" : playing ? "正在播放" : "BGM 待机"}</div>
-      <div className="bgm-indicator-main">
-        <span className="bgm-indicator-text">{label}</span>
-      </div>
     </div>
   );
 });
@@ -1932,7 +1910,7 @@ export function useVnRuntime() {
           <div
             className="credits-bg"
             style={{
-              backgroundImage: 'url("https://i.imgur.com/FAWl3AP.png")',
+              backgroundImage: `url("${TITLE_SCREEN_BG}")`,
               filter: "blur(7px)",
               transform: "scale(1.08)",
               opacity: 0.92,
@@ -2230,7 +2208,6 @@ export function useVnRuntime() {
           </div>
 
           <div id="hud" style={{ display: curLine ? "block" : "none" }}>
-            <FloatingBgm label={currentBgmLabel} playing={bgmPlaying && !bgmMuted} muted={bgmMuted} moodClass={bgmMoodClass} />
             <div
               id="box"
               className={`${!typing && curLine?.kind !== "choice" ? "can-advance" : ""} ${curLine?.kind === "choice" ? "choice-mode" : ""}`.trim()}
