@@ -147,6 +147,26 @@ function getCodeFenceLanguage(path: string): string {
   return "text";
 }
 
+function isKeySceneTransition(line?: (typeof SCRIPT.lines)[number]) {
+  if (!line) return false;
+  if (line.kind === "title" || line.cg) return true;
+  if (line.transition && !["none", "cut"].includes(line.transition)) return true;
+  if (line.effect && !["none", "rain", "blur"].includes(line.effect)) return true;
+  if (line.scene && /(梦境|回忆|地下室|暴雨|黎明|医院|审判|终章|尾声)/.test(line.scene)) return true;
+  return false;
+}
+
+function findNextScenePreviewUrl(startIndex: number, resolver: (scene: string | undefined) => string) {
+  const currentScene = SCRIPT.lines[startIndex]?.scene;
+  for (let i = startIndex + 1; i < Math.min(SCRIPT.lines.length, startIndex + 12); i += 1) {
+    const nextScene = SCRIPT.lines[i]?.scene;
+    if (nextScene && nextScene !== currentScene) {
+      return resolver(nextScene);
+    }
+  }
+  return "";
+}
+
 const RainCanvas = memo(function RainCanvas({
   active,
   lowPerfMode,
@@ -424,6 +444,7 @@ export function useVnRuntime() {
   const [customSceneBgUrl, setCustomSceneBgUrl] = useState("");
   const [openingPreludeVisible, setOpeningPreludeVisible] = useState(false);
   const [openingPreludeText, setOpeningPreludeText] = useState("第一幕 · 正在展开");
+  const particlesEnabled = settings.particlesEnabled && !lowPerfMode;
 
   const autoTimeoutRef = useRef<number | null>(null);
   const typingFrameRef = useRef<number | null>(null);
@@ -727,21 +748,10 @@ export function useVnRuntime() {
 
   useEffect(() => {
     if (phase !== "playing") return;
-    const upcoming = new Set<string>();
-    for (let i = index; i < Math.min(SCRIPT.lines.length, index + 3); i += 1) {
-      upcoming.add(resolveSceneBackground(SCRIPT.lines[i]?.scene));
-      const line = SCRIPT.lines[i];
-      if (!line) continue;
-      getSceneCharacters(SCRIPT.lines, i, line.speaker).forEach((ch) => {
-        upcoming.add(ch.spriteUrl);
-      });
-    }
-    upcoming.forEach((url) => {
-      queueImagePreload(url);
-      void ensureImageReady(url).then(() => {
-        setSpriteReadyMap((prev) => (prev[url] ? prev : { ...prev, [url]: true }));
-      });
-    });
+    const nextBgUrl = findNextScenePreviewUrl(index, resolveSceneBackground);
+    if (!nextBgUrl) return;
+    queueImagePreload(nextBgUrl);
+    void ensureImageReady(nextBgUrl);
   }, [index, phase, resolveSceneBackground]);
 
   useEffect(() => {
@@ -762,10 +772,11 @@ export function useVnRuntime() {
     if (nextBg !== lastBgRef.current) {
       let cancelled = false;
       let clearTimer: number | null = null;
-      const nextTransition = curLine.transition || "dissolve";
+      const nextTransition = isKeySceneTransition(curLine) ? curLine.transition || "dissolve" : "cut";
       const currentBg = bgUrl || lastBgRef.current || DEFAULT_BG;
+      const shouldAnimateTransition = !lowPerfMode && nextTransition !== "cut";
 
-      if (!lowPerfMode) {
+      if (shouldAnimateTransition) {
         setPrevBgUrl(currentBg);
         setTransitionType(nextTransition);
         setTransitionActive(true);
@@ -782,7 +793,7 @@ export function useVnRuntime() {
           if (cancelled) return;
           setBgUrl(resolvedBg);
           lastBgRef.current = resolvedBg;
-          if (lowPerfMode) return;
+          if (!shouldAnimateTransition) return;
           clearTimer = window.setTimeout(() => {
             if (!cancelled) {
               setTransitionActive(false);
@@ -809,13 +820,13 @@ export function useVnRuntime() {
 
   useEffect(() => {
     if (phase !== "playing" || !curLine) return;
-    setShowRain(Boolean(curLine.scene?.includes("雨") || curLine.effect === "rain"));
-    setSceneBlur(Boolean(curLine.scene?.includes("梦境") || curLine.scene?.includes("回忆") || curLine.effect === "blur"));
+    setShowRain(particlesEnabled && Boolean(curLine.scene?.includes("雨") || curLine.effect === "rain"));
+    setSceneBlur(!lowPerfMode && Boolean(curLine.scene?.includes("梦境") || curLine.scene?.includes("回忆") || curLine.effect === "blur"));
     if (curLine.effect && !["rain", "blur", "none"].includes(curLine.effect)) {
       return triggerEffect(curLine.effect);
     }
     return undefined;
-  }, [curLine, phase, triggerEffect]);
+  }, [curLine, lowPerfMode, particlesEnabled, phase, triggerEffect]);
 
   useEffect(() => {
     if (cgCloseTimerRef.current) {
@@ -891,10 +902,9 @@ export function useVnRuntime() {
     if (phase !== "playing" || !curLine) return;
     setStageChars(getSceneCharacters(SCRIPT.lines, index, curLine.speaker));
     const upcoming = new Set<string>();
-    for (let i = index; i < Math.min(SCRIPT.lines.length, index + 2); i += 1) {
-      const line = SCRIPT.lines[i];
-      if (!line) continue;
-      getSceneCharacters(SCRIPT.lines, i, line.speaker).forEach((ch) => {
+    const nextLine = SCRIPT.lines[index + 1];
+    if (nextLine) {
+      getSceneCharacters(SCRIPT.lines, index + 1, nextLine.speaker).forEach((ch) => {
         upcoming.add(ch.spriteUrl);
       });
     }
@@ -1669,7 +1679,7 @@ export function useVnRuntime() {
           <div className="title-glow title-glow-left" />
           <div className="title-glow title-glow-right" />
           <div className="title-sweep" />
-          <DustCanvas active={!lowPerfMode} lowPerfMode={lowPerfMode} />
+          <DustCanvas active={particlesEnabled} lowPerfMode={lowPerfMode} />
 
           <div className="title-content">
             <div className="title-kicker">悬疑视觉小说</div>

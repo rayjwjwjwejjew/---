@@ -60,13 +60,18 @@ textarea {
 }
 
 #app-root.low-perf .title-glow {
-  filter: blur(34px);
-  opacity: 0.1;
+  display: none;
 }
 
 #app-root.low-perf .title-sweep {
-  opacity: 0.3;
-  animation-duration: 6.8s;
+  display: none;
+}
+
+#app-root.low-perf .title-grid,
+#app-root.low-perf .title-film,
+#app-root.low-perf .title-omen,
+#app-root.low-perf .title-main-glow {
+  display: none;
 }
 
 #app-root.low-perf .bg-layer::after,
@@ -75,7 +80,7 @@ textarea {
 }
 
 #app-root.low-perf .fx-scene-blur .bg-container {
-  filter: blur(1px) brightness(0.88);
+  filter: none;
 }
 
 #app-root.low-perf #box,
@@ -94,6 +99,12 @@ textarea {
 #app-root.low-perf .save-slot-preview-noise,
 #app-root.low-perf .cg-stage::before,
 #app-root.low-perf .cg-stage::after {
+  display: none;
+}
+
+#app-root.low-perf .transition-overlay,
+#app-root.low-perf .opening-prelude,
+#app-root.low-perf .cg-caption {
   display: none;
 }
 
@@ -1184,7 +1195,6 @@ textarea {
   filter: blur(0.2px);
   opacity: 0.82;
   transform: translateY(6px) scale(0.96);
-  animation: spritePlaceholderBreath 1.8s ease-in-out infinite;
 }
 
 .sprite-multi.loading::after {
@@ -1308,32 +1318,10 @@ textarea {
 .sprite-multi.show.speaking.left,
 .sprite-multi.show.speaking.right {
   transform: translateY(calc(var(--sprite-y) - 8px)) scale(1.08);
-  animation: spriteBreathe 5s ease-in-out infinite;
 }
 
 .sprite-multi.show.speaking.center {
   transform: translateX(-50%) translateY(calc(var(--sprite-y) - 8px)) scale(1.08);
-  animation: spriteBreatheCenter 5s ease-in-out infinite;
-}
-
-@keyframes spriteBreathe {
-  0%,
-  100% {
-    transform: translateY(calc(var(--sprite-y) - 8px)) scale(1.08);
-  }
-  50% {
-    transform: translateY(calc(var(--sprite-y) - 10px)) scale(1.083);
-  }
-}
-
-@keyframes spriteBreatheCenter {
-  0%,
-  100% {
-    transform: translateX(-50%) translateY(calc(var(--sprite-y) - 8px)) scale(1.08);
-  }
-  50% {
-    transform: translateX(-50%) translateY(calc(var(--sprite-y) - 10px)) scale(1.083);
-  }
 }
 
 #panelBar {

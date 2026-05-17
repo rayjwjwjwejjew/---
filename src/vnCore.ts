@@ -12,6 +12,7 @@ export const DEFAULT_SETTINGS = {
   sfxVol: 70,
   uiSfxId: "",
   uiAlpha: 60,
+  particlesEnabled: false,
 };
 
 export type Settings = typeof DEFAULT_SETTINGS;

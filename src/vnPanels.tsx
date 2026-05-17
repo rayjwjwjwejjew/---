@@ -124,6 +124,13 @@ export function SettingsPanel({ settings, onChange, onReset }: SettingsPanelProp
         <span className="tiny mono">{settings.uiAlpha}%</span>
       </div>
       <div className="row">
+        <span className="label">粒子效果</span>
+        <button className="btn" onClick={() => onChange((s) => ({ ...s, particlesEnabled: !s.particlesEnabled }))}>
+          {settings.particlesEnabled ? "已开启" : "默认关闭"}
+        </button>
+        <span className="tiny">雨丝、尘粒这类常驻粒子默认关闭，更稳。</span>
+      </div>
+      <div className="row">
         <button className="btn" onClick={onReset}>
           恢复默认
         </button>
