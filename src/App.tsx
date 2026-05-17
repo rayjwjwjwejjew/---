@@ -40,7 +40,6 @@ import {
   getCgCaption,
   getChoiceTone,
   getChoiceToneLabel,
-  getDialogueKicker,
   getDialogueTone,
   getBgmMoodClass,
   getCurrentBgmLabel,
@@ -182,7 +181,7 @@ const RainCanvas = memo(function RainCanvas({
     };
 
     resize();
-    for (let i = 0; i < (lowPerfMode ? 40 : 88); i += 1) {
+    for (let i = 0; i < (lowPerfMode ? 24 : 52); i += 1) {
       drops.push({
         x: Math.random() * width,
         y: Math.random() * height,
@@ -193,7 +192,7 @@ const RainCanvas = memo(function RainCanvas({
     }
 
     let frameId = 0;
-    const frameInterval = 1000 / (lowPerfMode ? 18 : 30);
+    const frameInterval = 1000 / (lowPerfMode ? 12 : 20);
     const handleVisibility = () => {
       isPageVisible = document.visibilityState === "visible";
     };
@@ -279,7 +278,7 @@ const DustCanvas = memo(function DustCanvas({
     };
 
     resize();
-    for (let i = 0; i < (lowPerfMode ? 18 : 40); i += 1) {
+    for (let i = 0; i < (lowPerfMode ? 10 : 18); i += 1) {
       points.push({
         x: Math.random() * width,
         y: Math.random() * height,
@@ -291,7 +290,7 @@ const DustCanvas = memo(function DustCanvas({
     }
 
     let frameId = 0;
-    const frameInterval = 1000 / (lowPerfMode ? 12 : 22);
+    const frameInterval = 1000 / (lowPerfMode ? 8 : 14);
     const handleVisibility = () => {
       isPageVisible = document.visibilityState === "visible";
     };
@@ -1553,7 +1552,6 @@ export function useVnRuntime() {
   const showName = Boolean(speaker && speaker !== "旁白" && speaker !== "SYSTEM");
   const speakerColor = speaker ? CHARACTER_COLORS[speaker] || "rgba(255,241,248,0.96)" : "rgba(255,241,248,0.96)";
   const dialogueTone = getDialogueTone(curLine);
-  const dialogueKicker = getDialogueKicker(dialogueTone);
   const emphasisLine = isEmphasisLine(curLine?.text);
   const cgCaption = getCgCaption(currentAct, curLine);
   const currentBgmLabel = useMemo(
@@ -1653,7 +1651,7 @@ export function useVnRuntime() {
             className="title-bg"
             style={{
               backgroundImage: `url("${TITLE_SCREEN_BG}")`,
-              filter: "blur(7px)",
+              filter: "blur(4px)",
               transform: "scale(1.08)",
               opacity: 0.92,
             }}
@@ -1671,7 +1669,7 @@ export function useVnRuntime() {
           <div className="title-glow title-glow-left" />
           <div className="title-glow title-glow-right" />
           <div className="title-sweep" />
-          <DustCanvas active lowPerfMode={lowPerfMode} />
+          <DustCanvas active={!lowPerfMode} lowPerfMode={lowPerfMode} />
 
           <div className="title-content">
             <div className="title-kicker">悬疑视觉小说</div>
@@ -1780,8 +1778,8 @@ export function useVnRuntime() {
                   padding: "22px",
                   background: "rgba(12,16,28,0.88)",
                   boxShadow: "0 20px 60px rgba(0,0,0,0.45)",
-                  backdropFilter: "blur(14px)",
-                  WebkitBackdropFilter: "blur(14px)",
+                  backdropFilter: "blur(8px)",
+                  WebkitBackdropFilter: "blur(8px)",
                   border: "1px solid rgba(255,255,255,0.08)",
                   color: "#fff",
                 }}
@@ -1942,7 +1940,7 @@ export function useVnRuntime() {
             className="credits-bg"
             style={{
               backgroundImage: `url("${TITLE_SCREEN_BG}")`,
-              filter: "blur(7px)",
+              filter: "blur(4px)",
               transform: "scale(1.08)",
               opacity: 0.92,
             }}
@@ -2003,7 +2001,6 @@ export function useVnRuntime() {
 
           <div className={`transition-overlay ${transitionActive ? `active ${transitionType}` : ""}`} />
           <div id="dim" />
-          <DustCanvas active lowPerfMode={lowPerfMode} />
           <RainCanvas active={showRain} lowPerfMode={lowPerfMode} />
 
           <StageSprites stageChars={stageChars} spriteReadyMap={spriteReadyMap} />
@@ -2251,11 +2248,6 @@ export function useVnRuntime() {
               className={`${!typing && curLine?.kind !== "choice" ? "can-advance" : ""} ${curLine?.kind === "choice" ? "choice-mode" : ""} tone-${dialogueTone} ${emphasisLine ? "emphasis-line" : ""}`.trim()}
               onClick={() => { if (!curLine?.options) handleNext(); }}
             >
-              <div className="box-header">
-                <span className="box-code">CASE {String(index + 1).padStart(3, "0")}</span>
-                <span className="box-scene">{curLine?.scene || currentAct || "SCENE LOG"}</span>
-              </div>
-
               <div id="name" style={{ display: showName ? "flex" : "none" }}>
                 <span className="name-line-left" style={{ background: `linear-gradient(to right, transparent 0%, ${speakerColor} 100%)` }} />
                 <span className="name-text-inner" style={{ color: speakerColor, borderColor: speakerColor.replace("0.95", "0.32") }}>
@@ -2263,8 +2255,6 @@ export function useVnRuntime() {
                 </span>
                 <span className="name-line-right" style={{ background: `linear-gradient(to left, transparent 0%, ${speakerColor} 100%)` }} />
               </div>
-
-              <div className={`text-kicker tone-${dialogueTone}`}>{dialogueKicker}</div>
 
               <div id="text" className={`${textVisible ? "show" : "text-exit"} tone-${dialogueTone} ${emphasisLine ? "emphasis-line" : ""}`.trim()}>
                 {curLine?.kind === "choice" ? "请选择：" : displayedText}
@@ -2289,12 +2279,7 @@ export function useVnRuntime() {
               </div>
 
               <div id="subline">
-                <div className="left">
-                  <span className="story-meta-label">CHAPTER</span>
-                  <span className="story-meta-value">{currentAct || "__ACT__"}</span>
-                </div>
                 <div className="right">
-                  <span className="story-meta-label">COUNT</span>
                   <span className="story-meta-value">{sceneProgress}</span>
                 </div>
               </div>

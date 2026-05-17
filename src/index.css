@@ -459,7 +459,7 @@ textarea {
   font-size: 16px;
   cursor: pointer;
   text-align: left;
-  backdrop-filter: blur(14px);
+  backdrop-filter: blur(8px);
   box-shadow: 0 8px 28px rgba(0, 0, 0, 0.26);
   transition: transform 0.22s ease, border-color 0.22s ease, background 0.22s ease;
 }
@@ -519,7 +519,7 @@ textarea {
   justify-content: center;
   padding: 28px;
   background: rgba(0, 0, 0, 0.48);
-  backdrop-filter: blur(16px);
+  backdrop-filter: blur(8px);
 }
 
 .title-panel-shell {
@@ -1380,13 +1380,13 @@ textarea {
   background:
     linear-gradient(
       180deg,
-      rgba(8, 8, 12, calc(var(--ui-alpha) * 0.92)) 0%,
-      rgba(8, 8, 12, calc(var(--ui-alpha) * 0.5)) 58%,
-      rgba(8, 8, 12, calc(var(--ui-alpha) * 0.18)) 100%
+      rgba(8, 8, 12, calc(var(--ui-alpha) * 1.28)) 0%,
+      rgba(8, 8, 12, calc(var(--ui-alpha) * 0.74)) 58%,
+      rgba(8, 8, 12, calc(var(--ui-alpha) * 0.3)) 100%
     );
-  box-shadow: 0 -10px 24px rgba(0, 0, 0, 0.1);
-  backdrop-filter: blur(6px) saturate(1);
-  -webkit-backdrop-filter: blur(6px) saturate(1);
+  box-shadow: 0 -12px 28px rgba(0, 0, 0, 0.16);
+  backdrop-filter: blur(3px) saturate(1);
+  -webkit-backdrop-filter: blur(3px) saturate(1);
   pointer-events: auto;
   cursor: pointer;
 }
@@ -1780,36 +1780,24 @@ textarea {
 
 #subline {
   width: min(980px, 100%);
-  margin: 16px auto 0;
+  margin: 14px auto 0;
   padding: 10px 0 0;
   display: flex;
-  justify-content: space-between;
-  gap: 12px;
+  justify-content: flex-end;
   align-items: center;
-  font-size: 11px;
-  color: rgba(255, 255, 255, 0.45);
   border-top: 1px solid rgba(255, 239, 218, 0.12);
 }
 
-#subline .left,
 #subline .right {
   display: flex;
-  gap: 10px;
   align-items: center;
-  flex-wrap: wrap;
-}
-
-.story-meta-label {
-  color: rgba(255, 225, 184, 0.54);
-  font-size: 10px;
-  letter-spacing: 0.28em;
 }
 
 .story-meta-value {
-  color: rgba(255, 244, 236, 0.88);
+  color: rgba(255, 244, 236, 0.9);
   font-family: var(--font-title);
-  font-size: 12px;
-  letter-spacing: 0.08em;
+  font-size: 14px;
+  letter-spacing: 0.06em;
 }
 
 .pill {
@@ -1862,7 +1850,7 @@ textarea {
   color: rgba(255, 248, 242, 0.92);
   text-align: left;
   cursor: pointer;
-  backdrop-filter: blur(10px);
+  backdrop-filter: blur(4px);
   box-shadow: 0 10px 22px rgba(0, 0, 0, 0.18);
   opacity: 0;
   transform: translateY(10px) scale(0.985);
@@ -2326,7 +2314,7 @@ textarea {
   border-radius: 24px;
   border: 1px solid rgba(255, 234, 212, 0.1);
   background: rgba(18, 14, 18, 0.52);
-  backdrop-filter: blur(14px);
+  backdrop-filter: blur(8px);
   box-shadow: 0 18px 48px rgba(0, 0, 0, 0.28);
   animation: openingPreludeRise 1.4s ease;
 }
