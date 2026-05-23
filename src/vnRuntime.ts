@@ -54,6 +54,27 @@ type UseSaveRuntimeArgs = {
   pulseUi: (_layer?: string) => void;
 };
 
+type UsePlaybackRuntimeArgs = {
+  index: number;
+  line?: ScriptLine;
+  phase: string;
+  activePanel: string | null;
+  showLog: boolean;
+  showQaPanel: boolean;
+  cgVisible: boolean;
+  settings: Settings;
+  closeCg: (advance?: boolean) => void;
+  pulseUi: (_layer?: string) => void;
+  onAdvance: () => void;
+  onBacktrack: (nextIndex: number) => void;
+  onJump: (nextIndex: number) => void;
+  onEnterCredits: () => void;
+  onAppendLog: (item: { who: string; text: string }) => void;
+  onQuickSave: () => void;
+  onToggleLog: () => void;
+  onCloseOverlays: () => void;
+};
+
 function safeParseJson<T>(raw: string | null, fallback: T): T {
   if (!raw) return fallback;
   try {
@@ -61,6 +82,35 @@ function safeParseJson<T>(raw: string | null, fallback: T): T {
   } catch {
     return fallback;
   }
+}
+
+const PAUSE_CHARS: Record<string, number> = {
+  "。": 6,
+  "！": 5,
+  "？": 5,
+  "…": 4,
+  "，": 2,
+  "、": 2,
+  "；": 3,
+  "：": 3,
+  ".": 4,
+  "!": 4,
+  "?": 4,
+  ",": 2,
+};
+
+const SMART_PAUSE_WORDS = ["……", "顿了顿", "沉默", "低声", "轻声", "迟疑", "犹豫", "停了一下", "想了想"];
+const EMOTION_WORDS = ["惊", "怕", "慌", "痛", "哭", "怒", "冷", "颤", "喘", "哽", "失控", "崩溃", "压抑", "紧张"];
+
+function getLineTypingDelay(text: string, index: number, baseMs: number) {
+  const char = text[index - 1] || "";
+  let delay = baseMs * (PAUSE_CHARS[char] || 1);
+  if (delay === baseMs) {
+    const windowText = text.slice(Math.max(0, index - 4), index + 4);
+    if (SMART_PAUSE_WORDS.some((word) => windowText.includes(word))) delay *= 1.8;
+    if (EMOTION_WORDS.some((word) => windowText.includes(word))) delay *= 1.35;
+  }
+  return Math.max(12, Math.round(delay));
 }
 
 export function useWorkspaceRuntime({
@@ -298,6 +348,260 @@ export function useSaveRuntime({
     loadSaveSlot,
     continueLastGame,
     deleteSaveSlot,
+  };
+}
+
+export function usePlaybackRuntime({
+  index,
+  line,
+  phase,
+  activePanel,
+  showLog,
+  showQaPanel,
+  cgVisible,
+  settings,
+  closeCg,
+  pulseUi,
+  onAdvance,
+  onBacktrack,
+  onJump,
+  onEnterCredits,
+  onAppendLog,
+  onQuickSave,
+  onToggleLog,
+  onCloseOverlays,
+}: UsePlaybackRuntimeArgs) {
+  const [typing, setTyping] = useState(false);
+  const [displayedText, setDisplayedText] = useState("");
+  const [auto, setAuto] = useState(false);
+  const [skip, setSkip] = useState(false);
+  const [textVisible, setTextVisible] = useState(true);
+  const [hudAwake, setHudAwake] = useState(false);
+
+  const autoTimeoutRef = useRef<number | null>(null);
+  const typingFrameRef = useRef<number | null>(null);
+  const typingDelayRef = useRef<number | null>(null);
+  const hudSleepRef = useRef<number | null>(null);
+
+  const wakeHud = useCallback(() => {
+    setHudAwake(true);
+    if (hudSleepRef.current) window.clearTimeout(hudSleepRef.current);
+    hudSleepRef.current = window.setTimeout(() => setHudAwake(false), 2200);
+  }, []);
+
+  useEffect(() => {
+    if (phase !== "playing") return;
+    if (!line) {
+      onEnterCredits();
+      return;
+    }
+    if (line.speaker === "SYSTEM" && line.text?.startsWith("JUMP:")) {
+      const label = line.text.slice(5).trim();
+      const target = SCRIPT.labelMap.get(label);
+      onJump(typeof target === "number" ? target : Math.min(SCRIPT.lines.length, index + 1));
+      return;
+    }
+
+    setTextVisible(false);
+    if (line.kind !== "choice") {
+      pulseUi(line.effect && line.effect !== "none" ? "emotion" : "story");
+    }
+    if (typingFrameRef.current) cancelAnimationFrame(typingFrameRef.current);
+    if (typingDelayRef.current) window.clearTimeout(typingDelayRef.current);
+    typingDelayRef.current = window.setTimeout(() => {
+      setDisplayedText("");
+      setTyping(true);
+      setTextVisible(true);
+      let nextText = line.text || "";
+      if (line.kind === "choice") nextText = "请选择：";
+      if (skip || settings.typeMs === 0) {
+        setDisplayedText(nextText);
+        setTyping(false);
+        return;
+      }
+
+      let ci = 0;
+      let lastTime = performance.now();
+      let frameId = 0;
+      const frame = (now: number) => {
+        const effectiveDelay = getLineTypingDelay(nextText, ci, settings.typeMs);
+        const delta = now - lastTime;
+        if (delta >= effectiveDelay) {
+          const previousChar = nextText[ci - 1] || "";
+          const step = PAUSE_CHARS[previousChar] ? 1 : Math.max(1, Math.floor(delta / Math.max(1, settings.typeMs)));
+          ci = Math.min(nextText.length, ci + step);
+          setDisplayedText(nextText.slice(0, ci));
+          lastTime = now;
+        }
+        if (ci < nextText.length) {
+          frameId = requestAnimationFrame(frame);
+          typingFrameRef.current = frameId;
+        } else {
+          setTyping(false);
+          typingFrameRef.current = null;
+        }
+      };
+      frameId = requestAnimationFrame(frame);
+      typingFrameRef.current = frameId;
+    }, 120);
+
+    return () => {
+      if (typingDelayRef.current) window.clearTimeout(typingDelayRef.current);
+      if (typingFrameRef.current) cancelAnimationFrame(typingFrameRef.current);
+    };
+  }, [index, line, onEnterCredits, onJump, phase, pulseUi, settings.typeMs, skip]);
+
+  const handleNext = useCallback(() => {
+    if (phase !== "playing" || !line) return;
+    if (cgVisible) {
+      closeCg(true);
+      return;
+    }
+    if (typing) {
+      if (typingFrameRef.current) {
+        cancelAnimationFrame(typingFrameRef.current);
+        typingFrameRef.current = null;
+      }
+      setDisplayedText(line.kind === "choice" ? "请选择：" : line.text || "");
+      setTyping(false);
+      return;
+    }
+    if (line.kind === "choice") return;
+    if (line.kind === "label") {
+      onAdvance();
+      return;
+    }
+    if (line.speaker && line.text) {
+      onAppendLog({ who: line.speaker || "旁白", text: line.text || "" });
+    }
+    if (line.cg) {
+      pulseUi("cg");
+    }
+    onAdvance();
+  }, [cgVisible, closeCg, line, onAdvance, onAppendLog, phase, pulseUi, typing]);
+
+  const handlePrev = useCallback(() => {
+    if (phase !== "playing") return;
+    setAuto(false);
+    setSkip(false);
+    setTyping(false);
+    if (index <= 0) return;
+    let nextIndex = index - 1;
+    while (nextIndex > 0) {
+      const previousLine = SCRIPT.lines[nextIndex];
+      if (previousLine.kind === "label" || previousLine.kind === "choice") {
+        nextIndex -= 1;
+      } else {
+        break;
+      }
+    }
+    onBacktrack(nextIndex);
+  }, [index, onBacktrack, phase]);
+
+  const handleChoice = useCallback(
+    (cmd: string) => {
+      if (cmd.startsWith("@jump")) {
+        const label = cmd.replace("@jump", "").trim();
+        const target = SCRIPT.labelMap.get(label);
+        onJump(typeof target === "number" ? target : index + 1);
+        return;
+      }
+      onAdvance();
+    },
+    [index, onAdvance, onJump],
+  );
+
+  useEffect(() => {
+    if (autoTimeoutRef.current) {
+      window.clearTimeout(autoTimeoutRef.current);
+    }
+    if (phase !== "playing" || (!auto && !skip) || typing || line?.kind === "choice" || !line) return;
+    const delay = skip ? 50 : Math.max(180, settings.autoMs);
+    autoTimeoutRef.current = window.setTimeout(handleNext, delay);
+    return () => {
+      if (autoTimeoutRef.current) {
+        window.clearTimeout(autoTimeoutRef.current);
+      }
+    };
+  }, [auto, handleNext, line, phase, settings.autoMs, skip, typing]);
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if (phase === "playing") {
+        wakeHud();
+      }
+      if (phase !== "playing") return;
+      if (cgVisible && (event.key === " " || event.key === "Enter" || event.key === "Escape")) {
+        event.preventDefault();
+        closeCg(true);
+        return;
+      }
+      if ((event.key === " " || event.key === "Enter") && !activePanel && !showLog) {
+        event.preventDefault();
+        handleNext();
+      }
+      if (event.key === "Backspace" && !activePanel && !showLog) {
+        event.preventDefault();
+        handlePrev();
+      }
+      if (event.key.toLowerCase() === "l") onToggleLog();
+      if (event.key.toLowerCase() === "s") onQuickSave();
+      if (event.key === "Escape") {
+        onCloseOverlays();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => {
+      window.removeEventListener("keydown", handler);
+    };
+  }, [activePanel, cgVisible, closeCg, handleNext, handlePrev, onCloseOverlays, onQuickSave, onToggleLog, phase, showLog, wakeHud]);
+
+  useEffect(() => {
+    if (phase !== "playing") {
+      setHudAwake(false);
+      if (hudSleepRef.current) window.clearTimeout(hudSleepRef.current);
+      return;
+    }
+    const onMove = (event: MouseEvent) => {
+      if (event.clientY <= 112 || event.clientX <= 112) wakeHud();
+    };
+
+    if (activePanel || showLog || cgVisible || showQaPanel) setHudAwake(true);
+    window.addEventListener("mousemove", onMove);
+    return () => {
+      window.removeEventListener("mousemove", onMove);
+      if (hudSleepRef.current) window.clearTimeout(hudSleepRef.current);
+    };
+  }, [activePanel, cgVisible, phase, showLog, showQaPanel, wakeHud]);
+
+  useEffect(() => {
+    if (phase === "playing" && index > 0) {
+      onQuickSave();
+    }
+  }, [index, onQuickSave, phase]);
+
+  useEffect(() => {
+    return () => {
+      if (autoTimeoutRef.current) window.clearTimeout(autoTimeoutRef.current);
+      if (typingDelayRef.current) window.clearTimeout(typingDelayRef.current);
+      if (typingFrameRef.current) cancelAnimationFrame(typingFrameRef.current);
+      if (hudSleepRef.current) window.clearTimeout(hudSleepRef.current);
+    };
+  }, []);
+
+  return {
+    typing,
+    displayedText,
+    auto,
+    skip,
+    textVisible,
+    hudAwake,
+    setAuto,
+    setSkip,
+    setHudAwake,
+    handleNext,
+    handlePrev,
+    handleChoice,
   };
 }
 

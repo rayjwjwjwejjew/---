@@ -24,6 +24,7 @@ import { AssetsPanel, BgmPanel, DebugPanel, SavePanel, SettingsPanel } from "./v
 import {
   useAudioRuntime,
   useBackgroundRuntime,
+  usePlaybackRuntime,
   usePresentationRuntime,
   useSaveRuntime,
   useSceneRuntime,
@@ -61,24 +62,6 @@ import viteConfigSource from "../vite.config.ts?raw";
 type GamePhase = "warning" | "title" | "playing" | "credits";
 type LogItem = { who: string; text: string };
 
-const PAUSE_CHARS: Record<string, number> = {
-  "。": 6,
-  "！": 5,
-  "？": 5,
-  "…": 4,
-  "，": 2,
-  "、": 2,
-  "；": 3,
-  "：": 3,
-  ".": 4,
-  "!": 4,
-  "?": 4,
-  ",": 2,
-};
-
-const SMART_PAUSE_WORDS = ["……", "顿了顿", "沉默", "低声", "轻声", "迟疑", "犹豫", "停了一下", "想了想"];
-const EMOTION_WORDS = ["惊", "怕", "慌", "痛", "哭", "怒", "冷", "颤", "喘", "哽", "失控", "崩溃", "压抑", "紧张"];
-
 const CREDITS_BLOCKS = [
   { role: "原作 / 编剧", names: "Ray、Justin" },
   { role: "导演 / 演出构成", names: "Ray、Justin" },
@@ -102,25 +85,6 @@ const QA_ITEMS = [
 ];
 
 const SCRIPT_SCENES = collectScriptScenes(SCRIPT.lines);
-
-function getLineTypingDelay(text: string, index: number, baseMs: number) {
-  const char = text[index - 1] || "";
-  let delay = baseMs * (PAUSE_CHARS[char] || 1);
-  const segment = text.slice(Math.max(0, index - 24), index + 6);
-  if (SMART_PAUSE_WORDS.some((word) => segment.includes(word))) {
-    delay *= 1.4;
-  }
-  if (EMOTION_WORDS.some((word) => segment.includes(word))) {
-    delay *= 1.18;
-  }
-  if (/[!?！？]/.test(char)) {
-    delay *= 1.2;
-  }
-  if (text.length > 36) {
-    delay *= 1.08;
-  }
-  return Math.max(10, Math.min(240, delay));
-}
 
 function getCodeFenceLanguage(path: string): string {
   if (path.endsWith(".tsx")) return "tsx";
@@ -349,10 +313,6 @@ export function useVnRuntime() {
   const [settings, setSettings] = useState<Settings>(() => readJson(STORAGE_KEYS.settings, DEFAULT_SETTINGS));
   const [phase, setPhase] = useState<GamePhase>("warning");
   const [log, setLog] = useState<LogItem[]>([]);
-  const [typing, setTyping] = useState(false);
-  const [displayedText, setDisplayedText] = useState("");
-  const [auto, setAuto] = useState(false);
-  const [skip, setSkip] = useState(false);
   const [currentAct, setCurrentAct] = useState("");
   const [codeTxtUrl, setCodeTxtUrl] = useState("");
   const [effectActive, setEffectActive] = useState("");
@@ -362,9 +322,7 @@ export function useVnRuntime() {
   const [bgmList, setBgmList] = useState<{ id: string; label: string }[]>([]);
   const [sfxList, setSfxList] = useState<{ id: string; label: string }[]>([]);
   const [titleReady, setTitleReady] = useState(false);
-  const [textVisible, setTextVisible] = useState(true);
   const [lowPerfMode, setLowPerfMode] = useState(false);
-  const [hudAwake, setHudAwake] = useState(false);
   const {
     showLog,
     activePanel,
@@ -395,10 +353,6 @@ export function useVnRuntime() {
   );
   const particlesEnabled = settings.particlesEnabled && !lowPerfMode;
 
-  const autoTimeoutRef = useRef<number | null>(null);
-  const typingFrameRef = useRef<number | null>(null);
-  const typingDelayRef = useRef<number | null>(null);
-  const hudSleepRef = useRef<number | null>(null);
   const codeTxtUrlRef = useRef("");
 
   const curLine = SCRIPT.lines[index];
@@ -509,6 +463,42 @@ export function useVnRuntime() {
     onLoadBgmById: loadAndPlayBgm,
     onResetPresentationState: resetPresentationState,
     pulseUi,
+  });
+  const {
+    typing,
+    displayedText,
+    auto,
+    skip,
+    textVisible,
+    hudAwake,
+    setAuto,
+    setSkip,
+    setHudAwake,
+    handleNext,
+    handlePrev,
+    handleChoice,
+  } = usePlaybackRuntime({
+    index,
+    line: curLine,
+    phase,
+    activePanel,
+    showLog,
+    showQaPanel,
+    cgVisible,
+    settings,
+    closeCg,
+    pulseUi,
+    onAdvance: () => setIndex((value) => Math.min(SCRIPT.lines.length, value + 1)),
+    onBacktrack: (nextIndex) => setIndex(nextIndex),
+    onJump: (nextIndex) => setIndex(nextIndex),
+    onEnterCredits: () => setPhase("credits"),
+    onAppendLog: (item) => setLog((prev) => [...prev, item].slice(-100)),
+    onQuickSave: () => saveGame(selectedSaveSlot, false),
+    onToggleLog: () => setShowLog((value) => !value),
+    onCloseOverlays: () => {
+      setActivePanel(null);
+      setShowLog(false);
+    },
   });
 
   useEffect(() => {
@@ -634,142 +624,9 @@ export function useVnRuntime() {
   }, [curLine, phase, playSfx, sfxList]);
 
   useEffect(() => {
-    if (phase !== "playing") return;
-    if (!curLine) {
-      setPhase("credits");
-      return;
-    }
-    if (curLine.speaker === "SYSTEM" && curLine.text?.startsWith("JUMP:")) {
-      const label = curLine.text.slice(5).trim();
-      const target = SCRIPT.labelMap.get(label);
-      if (typeof target === "number") {
-        setIndex(target);
-      } else {
-        setIndex((value) => Math.min(SCRIPT.lines.length, value + 1));
-      }
-      return;
-    }
-
-    setCurrentAct(curLine.act);
-    setTextVisible(false);
-    if (curLine.kind !== "choice") {
-      pulseUi(curLine.effect && curLine.effect !== "none" ? "emotion" : "story");
-    }
-    if (typingFrameRef.current) cancelAnimationFrame(typingFrameRef.current);
-    if (typingDelayRef.current) window.clearTimeout(typingDelayRef.current);
-    typingDelayRef.current = window.setTimeout(() => {
-      setDisplayedText("");
-      setTyping(true);
-      setTextVisible(true);
-      let nextText = curLine.text || "";
-      if (curLine.kind === "choice") nextText = "请选择：";
-      if (skip || settings.typeMs === 0) {
-        setDisplayedText(nextText);
-        setTyping(false);
-        return;
-      }
-
-      let ci = 0;
-      let lastTime = performance.now();
-      let frameId = 0;
-      const frame = (now: number) => {
-        const effectiveDelay = getLineTypingDelay(nextText, ci, settings.typeMs);
-        const delta = now - lastTime;
-        if (delta >= effectiveDelay) {
-          const previousChar = nextText[ci - 1] || "";
-          const step = PAUSE_CHARS[previousChar] ? 1 : Math.max(1, Math.floor(delta / Math.max(1, settings.typeMs)));
-          ci = Math.min(nextText.length, ci + step);
-          setDisplayedText(nextText.slice(0, ci));
-          lastTime = now;
-        }
-        if (ci < nextText.length) {
-          frameId = requestAnimationFrame(frame);
-          typingFrameRef.current = frameId;
-        } else {
-          setTyping(false);
-          typingFrameRef.current = null;
-        }
-      };
-      frameId = requestAnimationFrame(frame);
-      typingFrameRef.current = frameId;
-    }, 120);
-
-    return () => {
-      if (typingDelayRef.current) window.clearTimeout(typingDelayRef.current);
-      if (typingFrameRef.current) cancelAnimationFrame(typingFrameRef.current);
-    };
-  }, [curLine, phase, settings.typeMs, skip]);
-
-  const handleNext = useCallback(() => {
     if (phase !== "playing" || !curLine) return;
-    if (cgVisible) {
-      closeCg(true);
-      return;
-    }
-    if (typing) {
-      if (typingFrameRef.current) {
-        cancelAnimationFrame(typingFrameRef.current);
-        typingFrameRef.current = null;
-      }
-      setDisplayedText(curLine.kind === "choice" ? "请选择：" : curLine.text || "");
-      setTyping(false);
-      return;
-    }
-    if (curLine.kind === "choice") return;
-    if (curLine.kind === "label") {
-      setIndex((value) => value + 1);
-      return;
-    }
-    if (curLine.speaker && curLine.text) {
-      setLog((prev) => [...prev, { who: curLine.speaker || "旁白", text: curLine.text || "" }].slice(-100));
-    }
-    if (curLine.cg) {
-      pulseUi("cg");
-    }
-    setIndex((value) => Math.min(SCRIPT.lines.length, value + 1));
-  }, [cgVisible, closeCg, curLine, phase, pulseUi, typing]);
-
-  const handlePrev = useCallback(() => {
-    if (phase !== "playing") return;
-    setAuto(false);
-    setSkip(false);
-    setTyping(false);
-    if (index <= 0) return;
-    let nextIndex = index - 1;
-    while (nextIndex > 0) {
-      const line = SCRIPT.lines[nextIndex];
-      if (line.kind === "label" || line.kind === "choice") {
-        nextIndex -= 1;
-      } else {
-        break;
-      }
-    }
-    setIndex(nextIndex);
-  }, [index, phase]);
-
-  const handleChoice = useCallback((cmd: string) => {
-    if (cmd.startsWith("@jump")) {
-      const label = cmd.replace("@jump", "").trim();
-      const target = SCRIPT.labelMap.get(label);
-      setIndex(typeof target === "number" ? target : index + 1);
-      return;
-    }
-    setIndex((value) => value + 1);
-  }, [index]);
-
-  useEffect(() => {
-    if (autoTimeoutRef.current) {
-      window.clearTimeout(autoTimeoutRef.current);
-    }
-    if (phase !== "playing" || (!auto && !skip) || typing || curLine?.kind === "choice" || !curLine) return;
-    const delay = skip ? 50 : Math.max(180, settings.autoMs);
-    autoTimeoutRef.current = window.setTimeout(handleNext, delay);
-    return () => {
-      if (autoTimeoutRef.current) {
-        window.clearTimeout(autoTimeoutRef.current);
-      }
-    };
-  }, [auto, curLine, handleNext, phase, settings.autoMs, skip, typing]);
+    setCurrentAct(curLine.act);
+  }, [curLine, phase]);
 
   const startNewGame = () => {
     if (startTransitioning) return;
@@ -825,11 +682,6 @@ export function useVnRuntime() {
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      if (phase === "playing") {
-        setHudAwake(true);
-        if (hudSleepRef.current) window.clearTimeout(hudSleepRef.current);
-        hudSleepRef.current = window.setTimeout(() => setHudAwake(false), 2200);
-      }
       if (phase === "warning") return;
       if (phase === "title") {
         if (event.key === "Escape") {
@@ -844,61 +696,12 @@ export function useVnRuntime() {
         }
         return;
       }
-      if (phase !== "playing") return;
-      if (cgVisible && (event.key === " " || event.key === "Enter" || event.key === "Escape")) {
-        event.preventDefault();
-        closeCg(true);
-        return;
-      }
-      if ((event.key === " " || event.key === "Enter") && !activePanel && !showLog) {
-        event.preventDefault();
-        handleNext();
-      }
-      if (event.key === "Backspace" && !activePanel && !showLog) {
-        event.preventDefault();
-        handlePrev();
-      }
-      if (event.key.toLowerCase() === "l") setShowLog((value) => !value);
-      if (event.key.toLowerCase() === "s") saveGame();
-      if (event.key === "Escape") {
-        setActivePanel(null);
-        setShowLog(false);
-      }
     };
     window.addEventListener("keydown", handler);
     return () => {
       window.removeEventListener("keydown", handler);
     };
-  }, [activePanel, cgVisible, closeCg, handleNext, handlePrev, phase, saveGame, showLog, showQaPanel]);
-
-  useEffect(() => {
-    if (phase !== "playing") {
-      setHudAwake(false);
-      if (hudSleepRef.current) window.clearTimeout(hudSleepRef.current);
-      return;
-    }
-    const wakeHud = () => {
-      setHudAwake(true);
-      if (hudSleepRef.current) window.clearTimeout(hudSleepRef.current);
-      hudSleepRef.current = window.setTimeout(() => setHudAwake(false), 2200);
-    };
-    const onMove = (event: MouseEvent) => {
-      if (event.clientY <= 112 || event.clientX <= 112) wakeHud();
-    };
-
-    if (activePanel || showLog || cgVisible) setHudAwake(true);
-    window.addEventListener("mousemove", onMove);
-    return () => {
-      window.removeEventListener("mousemove", onMove);
-      if (hudSleepRef.current) window.clearTimeout(hudSleepRef.current);
-    };
-  }, [activePanel, cgVisible, phase, showLog]);
-
-  useEffect(() => {
-    if (phase === "playing" && index > 0) {
-      saveGame(selectedSaveSlot, false);
-    }
-  }, [index, phase, saveGame, selectedSaveSlot]);
+  }, [activePanel, phase, showQaPanel]);
 
   const handleExportAllCodeTxt = () => {
     const files = [
