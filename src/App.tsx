@@ -15,7 +15,6 @@ import {
   type SaveSlot,
   type Settings,
 } from "./vnCore";
-import { queueImagePreload } from "./vnMedia";
 import { CORNER_IMG_URL, CREDITS_BLOCKS, QA_ITEMS, TITLE_SCREEN_BG } from "./vnContent";
 import { AssetsPanel, SettingsPanel } from "./vnPanels";
 import { buildExportSourceFiles } from "./vnSourceBundle";
@@ -30,6 +29,8 @@ import {
   usePresentationRuntime,
   useSaveRuntime,
   useSceneRuntime,
+  useShellRuntime,
+  useStageEffectsRuntime,
   useWorkspaceRuntime,
 } from "./vnRuntime";
 import {
@@ -70,12 +71,7 @@ export function useVnRuntime() {
   const [settings, setSettings] = useState<Settings>(() => readJson(STORAGE_KEYS.settings, DEFAULT_SETTINGS));
   const [phase, setPhase] = useState<GamePhase>("warning");
   const [log, setLog] = useState<LogItem[]>([]);
-  const [currentAct, setCurrentAct] = useState("");
-  const [effectActive, setEffectActive] = useState("");
-  const [showRain, setShowRain] = useState(false);
-  const [sceneBlur, setSceneBlur] = useState(false);
   const [debugExpressionOverride, setDebugExpressionOverride] = useState<"calm" | "panic" | null>(null);
-  const [lowPerfMode, setLowPerfMode] = useState(false);
   const {
     showLog,
     activePanel,
@@ -101,6 +97,12 @@ export function useVnRuntime() {
     setSceneQuery,
   } = useWorkspaceRuntime();
   const isEditorMode = workspaceMode === "editor";
+  const { lowPerfMode } = useShellRuntime({
+    settings,
+    isEditorMode,
+    activePanel,
+    onCloseRestrictedPanel: () => setActivePanel(null),
+  });
   const {
     manifestState,
     bgmList,
@@ -130,6 +132,23 @@ export function useVnRuntime() {
     setCurrentBgmName,
     setCurrentBgmId,
   } = useAudioRuntime({ settings, bgmList });
+  const {
+    currentAct,
+    showRain,
+    effectClasses,
+    triggerEffect,
+  } = useStageEffectsRuntime({
+    line: curLine,
+    phase,
+    particlesEnabled,
+    lowPerfMode,
+    bgmList,
+    sfxList,
+    currentBgmName,
+    crossfadeBgm,
+    playSfx,
+    setCurrentBgmName,
+  });
   const {
     bgUrl,
     prevBgUrl,
@@ -204,11 +223,10 @@ export function useVnRuntime() {
     buildSnapshot,
     bgmList,
     selectedSaveSlot,
-    onRestoreSession: ({ index: nextIndex, log: nextLog, act, bgmName }) => {
+    onRestoreSession: ({ index: nextIndex, log: nextLog, bgmName }) => {
       setPhase("playing");
       setIndex(nextIndex);
       setLog(nextLog);
-      setCurrentAct(act);
       setActivePanel(null);
       setShowLog(false);
       setAuto(false);
@@ -260,95 +278,6 @@ export function useVnRuntime() {
   const exportFiles = useMemo(() => buildExportSourceFiles(), []);
   const { codeTxtUrl, exportAllCodeTxt } = useCodeExportRuntime({ files: exportFiles });
 
-  useEffect(() => {
-    const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
-    const coarsePointerQuery = window.matchMedia("(pointer: coarse)");
-    const applyPerformanceMode = () => {
-      const lowCoreCount = (navigator.hardwareConcurrency || 8) <= 4;
-      const compactViewport = window.innerWidth < 900;
-      setLowPerfMode(reducedMotionQuery.matches || lowCoreCount || (coarsePointerQuery.matches && compactViewport));
-    };
-
-    applyPerformanceMode();
-    reducedMotionQuery.addEventListener("change", applyPerformanceMode);
-    coarsePointerQuery.addEventListener("change", applyPerformanceMode);
-    window.addEventListener("resize", applyPerformanceMode);
-    return () => {
-      reducedMotionQuery.removeEventListener("change", applyPerformanceMode);
-      coarsePointerQuery.removeEventListener("change", applyPerformanceMode);
-      window.removeEventListener("resize", applyPerformanceMode);
-    };
-  }, []);
-
-  useEffect(() => {
-    const root = document.documentElement.style;
-    root.setProperty("--dim", `${settings.dim / 100}`);
-    root.setProperty("--sprite-w", `${settings.spriteW}px`);
-    root.setProperty("--sprite-h", `${Math.round(settings.spriteW * 1.73)}px`);
-    root.setProperty("--sprite-opacity", `${settings.spriteOpacity / 100}`);
-    root.setProperty("--bg-scale", `${settings.bgScale / 100}`);
-    root.setProperty("--bg-opacity", `${settings.bgOpacity / 100}`);
-    root.setProperty("--sprite-y", `${settings.spriteY}px`);
-    root.setProperty("--sprite-x", `${settings.spriteX}px`);
-    root.setProperty("--ui-alpha", `${0.05 + settings.uiAlpha / 420}`);
-    root.setProperty("--title-bg-url", `url("${TITLE_SCREEN_BG}")`);
-    localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify(settings));
-  }, [settings]);
-
-  useEffect(() => {
-    if (!isEditorMode && (activePanel === "assets" || activePanel === "debug")) {
-      setActivePanel(null);
-    }
-  }, [activePanel, isEditorMode]);
-
-  useEffect(() => {
-    queueImagePreload(TITLE_SCREEN_BG);
-    queueImagePreload(CORNER_IMG_URL);
-  }, []);
-
-  const triggerEffect = useCallback((effectName: string) => {
-    if (!effectName || effectName === "none") return;
-    setEffectActive(effectName);
-    const timer = window.setTimeout(() => {
-      setEffectActive("");
-    }, effectName === "shake" ? 500 : 800);
-    return () => window.clearTimeout(timer);
-  }, []);
-
-  useEffect(() => {
-    if (phase !== "playing" || !curLine) return;
-    setShowRain(particlesEnabled && Boolean(curLine.scene?.includes("雨") || curLine.effect === "rain"));
-    setSceneBlur(!lowPerfMode && Boolean(curLine.scene?.includes("梦境") || curLine.scene?.includes("回忆") || curLine.effect === "blur"));
-    if (curLine.effect && !["rain", "blur", "none"].includes(curLine.effect)) {
-      return triggerEffect(curLine.effect);
-    }
-    return undefined;
-  }, [curLine, lowPerfMode, particlesEnabled, phase, triggerEffect]);
-
-  useEffect(() => {
-    if (phase !== "playing" || !curLine?.bgm) return;
-    if (curLine.bgm === currentBgmName) return;
-    const match = bgmList.find((item) => item.label.includes(curLine.bgm || ""));
-    if (match) {
-      void crossfadeBgm(match.id, match.label);
-    } else {
-      setCurrentBgmName(curLine.bgm);
-    }
-  }, [bgmList, crossfadeBgm, curLine, currentBgmName, phase]);
-
-  useEffect(() => {
-    if (phase !== "playing" || !curLine?.sfx) return;
-    const match = sfxList.find((item) => item.label.includes(curLine.sfx || ""));
-    if (match) {
-      void playSfx(match.id);
-    }
-  }, [curLine, phase, playSfx, sfxList]);
-
-  useEffect(() => {
-    if (phase !== "playing" || !curLine) return;
-    setCurrentAct(curLine.act);
-  }, [curLine, phase]);
-
   const {
     titleReady,
     startNewGame,
@@ -385,17 +314,6 @@ export function useVnRuntime() {
     onSetOpenQaIndex: setOpenQaIndex,
     onSetActivePanel: setActivePanel,
   });
-
-  const effectClasses = [
-    effectActive === "shake" ? "fx-shake" : "",
-    effectActive === "flash-white" ? "fx-flash-white" : "",
-    effectActive === "flash-red" ? "fx-flash-red" : "",
-    effectActive === "darken" ? "fx-darken" : "",
-    effectActive === "brighten" ? "fx-brighten" : "",
-    sceneBlur ? "fx-scene-blur" : "",
-  ]
-    .filter(Boolean)
-    .join(" ");
 
   const speaker = curLine?.speaker;
   const showName = Boolean(speaker && speaker !== "旁白" && speaker !== "SYSTEM");

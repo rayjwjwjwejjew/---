@@ -3,6 +3,7 @@ import { AssetDB } from "./db";
 import { DEFAULT_BG, SCRIPT, getSceneBg, getSceneCharacters, getSpecialBg } from "./engine";
 import type { StageCharacter } from "./engine";
 import { ensureImageReady, queueImagePreload } from "./vnMedia";
+import { CORNER_IMG_URL, TITLE_SCREEN_BG } from "./vnContent";
 import { findBestAssetMatch, getBgmMoodClass, getCurrentBgmLabel } from "./vnDerived";
 import {
   STORAGE_KEYS,
@@ -118,6 +119,26 @@ type UseFlowRuntimeArgs = {
   onSetActivePanel: (value: string | null | ((prev: string | null) => string | null)) => void;
 };
 
+type UseShellRuntimeArgs = {
+  settings: Settings;
+  isEditorMode: boolean;
+  activePanel: string | null;
+  onCloseRestrictedPanel: () => void;
+};
+
+type UseStageEffectsRuntimeArgs = {
+  line?: ScriptLine;
+  phase: string;
+  particlesEnabled: boolean;
+  lowPerfMode: boolean;
+  bgmList: AudioItem[];
+  sfxList: AudioItem[];
+  currentBgmName: string;
+  crossfadeBgm: (assetId: string, name: string) => Promise<void>;
+  playSfx: (assetId: string) => Promise<void>;
+  setCurrentBgmName: (name: string) => void;
+};
+
 function safeParseJson<T>(raw: string | null, fallback: T): T {
   if (!raw) return fallback;
   try {
@@ -154,6 +175,146 @@ function getLineTypingDelay(text: string, index: number, baseMs: number) {
     if (EMOTION_WORDS.some((word) => windowText.includes(word))) delay *= 1.35;
   }
   return Math.max(12, Math.round(delay));
+}
+
+function buildEffectClasses(effectActive: string, sceneBlur: boolean) {
+  return [
+    effectActive === "shake" ? "fx-shake" : "",
+    effectActive === "flash-white" ? "fx-flash-white" : "",
+    effectActive === "flash-red" ? "fx-flash-red" : "",
+    effectActive === "darken" ? "fx-darken" : "",
+    effectActive === "brighten" ? "fx-brighten" : "",
+    sceneBlur ? "fx-scene-blur" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+export function useShellRuntime({
+  settings,
+  isEditorMode,
+  activePanel,
+  onCloseRestrictedPanel,
+}: UseShellRuntimeArgs) {
+  const [lowPerfMode, setLowPerfMode] = useState(false);
+
+  useEffect(() => {
+    const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const coarsePointerQuery = window.matchMedia("(pointer: coarse)");
+    const applyPerformanceMode = () => {
+      const lowCoreCount = (navigator.hardwareConcurrency || 8) <= 4;
+      const compactViewport = window.innerWidth < 900;
+      setLowPerfMode(reducedMotionQuery.matches || lowCoreCount || (coarsePointerQuery.matches && compactViewport));
+    };
+
+    applyPerformanceMode();
+    reducedMotionQuery.addEventListener("change", applyPerformanceMode);
+    coarsePointerQuery.addEventListener("change", applyPerformanceMode);
+    window.addEventListener("resize", applyPerformanceMode);
+    return () => {
+      reducedMotionQuery.removeEventListener("change", applyPerformanceMode);
+      coarsePointerQuery.removeEventListener("change", applyPerformanceMode);
+      window.removeEventListener("resize", applyPerformanceMode);
+    };
+  }, []);
+
+  useEffect(() => {
+    const root = document.documentElement.style;
+    root.setProperty("--dim", `${settings.dim / 100}`);
+    root.setProperty("--sprite-w", `${settings.spriteW}px`);
+    root.setProperty("--sprite-h", `${Math.round(settings.spriteW * 1.73)}px`);
+    root.setProperty("--sprite-opacity", `${settings.spriteOpacity / 100}`);
+    root.setProperty("--bg-scale", `${settings.bgScale / 100}`);
+    root.setProperty("--bg-opacity", `${settings.bgOpacity / 100}`);
+    root.setProperty("--sprite-y", `${settings.spriteY}px`);
+    root.setProperty("--sprite-x", `${settings.spriteX}px`);
+    root.setProperty("--ui-alpha", `${0.05 + settings.uiAlpha / 420}`);
+    root.setProperty("--title-bg-url", `url("${TITLE_SCREEN_BG}")`);
+    localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify(settings));
+  }, [settings]);
+
+  useEffect(() => {
+    if (!isEditorMode && (activePanel === "assets" || activePanel === "debug")) {
+      onCloseRestrictedPanel();
+    }
+  }, [activePanel, isEditorMode, onCloseRestrictedPanel]);
+
+  useEffect(() => {
+    queueImagePreload(TITLE_SCREEN_BG);
+    queueImagePreload(CORNER_IMG_URL);
+  }, []);
+
+  return {
+    lowPerfMode,
+  };
+}
+
+export function useStageEffectsRuntime({
+  line,
+  phase,
+  particlesEnabled,
+  lowPerfMode,
+  bgmList,
+  sfxList,
+  currentBgmName,
+  crossfadeBgm,
+  playSfx,
+  setCurrentBgmName,
+}: UseStageEffectsRuntimeArgs) {
+  const [currentAct, setCurrentAct] = useState("");
+  const [effectActive, setEffectActive] = useState("");
+  const [showRain, setShowRain] = useState(false);
+  const [sceneBlur, setSceneBlur] = useState(false);
+
+  const triggerEffect = useCallback((effectName: string) => {
+    if (!effectName || effectName === "none") return;
+    setEffectActive(effectName);
+    const timer = window.setTimeout(() => {
+      setEffectActive("");
+    }, effectName === "shake" ? 500 : 800);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  useEffect(() => {
+    if (phase !== "playing" || !line) return;
+    setShowRain(particlesEnabled && Boolean(line.scene?.includes("雨") || line.effect === "rain"));
+    setSceneBlur(!lowPerfMode && Boolean(line.scene?.includes("梦境") || line.scene?.includes("回忆") || line.effect === "blur"));
+    if (line.effect && !["rain", "blur", "none"].includes(line.effect)) {
+      return triggerEffect(line.effect);
+    }
+    return undefined;
+  }, [line, lowPerfMode, particlesEnabled, phase, triggerEffect]);
+
+  useEffect(() => {
+    if (phase !== "playing" || !line?.bgm) return;
+    if (line.bgm === currentBgmName) return;
+    const match = bgmList.find((item) => item.label.includes(line.bgm || ""));
+    if (match) {
+      void crossfadeBgm(match.id, match.label);
+    } else {
+      setCurrentBgmName(line.bgm);
+    }
+  }, [bgmList, crossfadeBgm, currentBgmName, line, phase, setCurrentBgmName]);
+
+  useEffect(() => {
+    if (phase !== "playing" || !line?.sfx) return;
+    const match = sfxList.find((item) => item.label.includes(line.sfx || ""));
+    if (match) {
+      void playSfx(match.id);
+    }
+  }, [line, phase, playSfx, sfxList]);
+
+  useEffect(() => {
+    if (phase !== "playing" || !line) return;
+    setCurrentAct(line.act);
+  }, [line, phase]);
+
+  return {
+    currentAct,
+    showRain,
+    effectClasses: buildEffectClasses(effectActive, sceneBlur),
+    triggerEffect,
+  };
 }
 
 export function useCodeExportRuntime({ files }: UseCodeExportRuntimeArgs) {
