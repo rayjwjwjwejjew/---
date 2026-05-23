@@ -1,10 +1,16 @@
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AssetDB } from "./db";
-import { SCRIPT, getSceneCharacters } from "./engine";
+import { DEFAULT_BG, SCRIPT, getSceneBg, getSceneCharacters, getSpecialBg } from "./engine";
 import type { StageCharacter } from "./engine";
 import { ensureImageReady, queueImagePreload } from "./vnMedia";
 import { getBgmMoodClass, getCurrentBgmLabel } from "./vnDerived";
-import type { Settings } from "./vnCore";
+import {
+  readSceneBgOverrides,
+  type Manifest,
+  type SceneBgOverride,
+  type Settings,
+  writeSceneBgOverrides,
+} from "./vnCore";
 
 type AudioItem = { id: string; label: string };
 
@@ -21,6 +27,15 @@ type UseSceneRuntimeArgs = {
   phase: string;
   resolveSceneBackground: (scene: string | undefined) => string;
   debugExpressionOverride: "calm" | "panic" | null;
+};
+
+type UseBackgroundRuntimeArgs = {
+  manifestState: Manifest;
+  index: number;
+  line?: ScriptLine;
+  phase: string;
+  lowPerfMode: boolean;
+  pulseUi: (_layer?: string) => void;
 };
 
 export function isKeySceneTransition(line?: ScriptLine) {
@@ -92,6 +107,248 @@ export function useSceneRuntime({
   return {
     spriteReadyMap,
     stageChars,
+  };
+}
+
+export function useBackgroundRuntime({
+  manifestState,
+  index,
+  line,
+  phase,
+  lowPerfMode,
+  pulseUi,
+}: UseBackgroundRuntimeArgs) {
+  const [bgUrl, setBgUrl] = useState<string>(DEFAULT_BG);
+  const [prevBgUrl, setPrevBgUrl] = useState<string>("");
+  const [transitionActive, setTransitionActive] = useState(false);
+  const [transitionType, setTransitionType] = useState("fade-black");
+  const [sceneBgOverrides, setSceneBgOverrides] = useState<Record<string, SceneBgOverride>>(() => readSceneBgOverrides());
+  const [selectedSceneName, setSelectedSceneName] = useState("");
+  const [selectedBackgroundAssetId, setSelectedBackgroundAssetId] = useState("");
+  const [customSceneBgUrl, setCustomSceneBgUrl] = useState("");
+
+  const lastBgRef = useRef("");
+  const bgAssetUrlCacheRef = useRef<Record<string, string>>({});
+
+  const ensureBackgroundAssetUrl = useCallback(async (assetId: string) => {
+    const cached = bgAssetUrlCacheRef.current[assetId];
+    if (cached) return cached;
+    const blob = await AssetDB.get<Blob>(AssetDB.STORE_ASSETS, assetId);
+    if (!blob) return "";
+    const url = URL.createObjectURL(blob);
+    bgAssetUrlCacheRef.current[assetId] = url;
+    return url;
+  }, []);
+
+  const getBackgroundAssetLabel = useCallback(
+    (assetId: string) => {
+      return (
+        manifestState.backgrounds?.find((item) => item.id === assetId)?.label ||
+        manifestState.bg?.find((item) => item.id === assetId)?.label ||
+        assetId
+      );
+    },
+    [manifestState.backgrounds, manifestState.bg],
+  );
+
+  const resolveSceneBackground = useCallback(
+    (scene: string | undefined) => {
+      if (!scene) return DEFAULT_BG;
+      const override = sceneBgOverrides[scene];
+      if (override?.source === "url" && override.value) return override.value;
+      if (override?.source === "asset" && bgAssetUrlCacheRef.current[override.value]) {
+        return bgAssetUrlCacheRef.current[override.value];
+      }
+      return getSceneBg(scene) || DEFAULT_BG;
+    },
+    [sceneBgOverrides],
+  );
+
+  const applySceneBackground = useCallback(
+    async (scene: string, assetId: string | null) => {
+      const nextOverrides = { ...sceneBgOverrides };
+      if (!assetId) {
+        delete nextOverrides[scene];
+        setSceneBgOverrides(nextOverrides);
+        writeSceneBgOverrides(nextOverrides);
+        return;
+      }
+      nextOverrides[scene] = { source: "asset", value: assetId, label: getBackgroundAssetLabel(assetId) };
+      setSceneBgOverrides(nextOverrides);
+      writeSceneBgOverrides(nextOverrides);
+      if (scene === line?.scene) {
+        const url = await ensureBackgroundAssetUrl(assetId);
+        if (url) {
+          setBgUrl(url);
+          lastBgRef.current = url;
+          pulseUi("scene");
+        }
+      }
+    },
+    [ensureBackgroundAssetUrl, getBackgroundAssetLabel, line?.scene, pulseUi, sceneBgOverrides],
+  );
+
+  const previewSceneBackground = useCallback(
+    async (scene: string, assetId?: string | null) => {
+      const override = sceneBgOverrides[scene];
+      if (assetId) {
+        const url = await ensureBackgroundAssetUrl(assetId);
+        if (url) {
+          setBgUrl(url);
+          lastBgRef.current = url;
+          pulseUi("scene");
+        }
+        return;
+      }
+      if (override?.source === "asset") {
+        const url = await ensureBackgroundAssetUrl(override.value);
+        if (url) {
+          setBgUrl(url);
+          lastBgRef.current = url;
+          pulseUi("scene");
+        }
+        return;
+      }
+      const builtIn = getSceneBg(scene) || DEFAULT_BG;
+      setBgUrl(builtIn);
+      lastBgRef.current = builtIn;
+      pulseUi("scene");
+    },
+    [ensureBackgroundAssetUrl, pulseUi, sceneBgOverrides],
+  );
+
+  const bindSceneUrl = useCallback(
+    (scene: string, url: string) => {
+      const nextOverrides: Record<string, SceneBgOverride> = {
+        ...sceneBgOverrides,
+        [scene]: { source: "url", value: url, label: url },
+      };
+      setSceneBgOverrides(nextOverrides);
+      writeSceneBgOverrides(nextOverrides);
+      setBgUrl(url);
+      lastBgRef.current = url;
+      pulseUi("scene");
+    },
+    [pulseUi, sceneBgOverrides],
+  );
+
+  const clearSceneBinding = useCallback(
+    (scene: string) => {
+      void applySceneBackground(scene, null);
+      if (selectedSceneName === scene) {
+        setCustomSceneBgUrl("");
+        setSelectedBackgroundAssetId("");
+      }
+    },
+    [applySceneBackground, selectedSceneName],
+  );
+
+  useEffect(() => {
+    if (!selectedSceneName) {
+      const initialScene = line?.scene || SCRIPT.lines[0]?.scene || "";
+      setSelectedSceneName(initialScene);
+      const initialOverride = sceneBgOverrides[initialScene];
+      setCustomSceneBgUrl(initialOverride?.source === "url" ? initialOverride.value : "");
+      setSelectedBackgroundAssetId(initialOverride?.source === "asset" ? initialOverride.value : "");
+    }
+  }, [line?.scene, sceneBgOverrides, selectedSceneName]);
+
+  useEffect(() => {
+    if (!selectedSceneName) return;
+    const override = sceneBgOverrides[selectedSceneName];
+    setCustomSceneBgUrl(override?.source === "url" ? override.value : "");
+    setSelectedBackgroundAssetId(override?.source === "asset" ? override.value : "");
+  }, [sceneBgOverrides, selectedSceneName]);
+
+  useEffect(() => {
+    if (phase !== "playing" || !line) return;
+    let nextBg = resolveSceneBackground(line.scene);
+    const special = getSpecialBg(index);
+    if (special) {
+      nextBg = special;
+    }
+
+    const override = line.scene ? sceneBgOverrides[line.scene] : undefined;
+    const loadAssetBg = async () => {
+      if (override?.source !== "asset") return nextBg;
+      const url = await ensureBackgroundAssetUrl(override.value);
+      return url || nextBg;
+    };
+
+    if (nextBg !== lastBgRef.current) {
+      let cancelled = false;
+      let clearTimer: number | null = null;
+      const nextTransition = isKeySceneTransition(line) ? line.transition || "dissolve" : "cut";
+      const currentBg = bgUrl || lastBgRef.current || DEFAULT_BG;
+      const shouldAnimateTransition = !lowPerfMode && nextTransition !== "cut";
+
+      if (shouldAnimateTransition) {
+        setPrevBgUrl(currentBg);
+        setTransitionType(nextTransition);
+        setTransitionActive(true);
+      } else {
+        setPrevBgUrl("");
+        setTransitionActive(false);
+      }
+      pulseUi("scene");
+
+      void loadAssetBg()
+        .then((resolvedBg) => ensureImageReady(resolvedBg).then(() => resolvedBg))
+        .catch(() => nextBg)
+        .then((resolvedBg) => {
+          if (cancelled) return;
+          setBgUrl(resolvedBg);
+          lastBgRef.current = resolvedBg;
+          if (!shouldAnimateTransition) return;
+          clearTimer = window.setTimeout(() => {
+            if (!cancelled) {
+              setTransitionActive(false);
+            }
+          }, nextTransition === "dissolve" ? 620 : 820);
+        });
+
+      return () => {
+        cancelled = true;
+        if (clearTimer) window.clearTimeout(clearTimer);
+      };
+    }
+    return undefined;
+  }, [bgUrl, ensureBackgroundAssetUrl, index, line, lowPerfMode, phase, pulseUi, resolveSceneBackground, sceneBgOverrides]);
+
+  useEffect(() => {
+    return () => {
+      Object.values(bgAssetUrlCacheRef.current).forEach((url) => URL.revokeObjectURL(url));
+    };
+  }, []);
+
+  const clearLastBackground = useCallback(() => {
+    lastBgRef.current = "";
+  }, []);
+
+  const showImmediateBackground = useCallback((url: string) => {
+    setBgUrl(url);
+    lastBgRef.current = url;
+  }, []);
+
+  return {
+    bgUrl,
+    prevBgUrl,
+    transitionActive,
+    transitionType,
+    sceneBgOverrides,
+    selectedSceneName,
+    selectedBackgroundAssetId,
+    customSceneBgUrl,
+    setSelectedSceneName,
+    setSelectedBackgroundAssetId,
+    setCustomSceneBgUrl,
+    resolveSceneBackground,
+    applySceneBackground,
+    previewSceneBackground,
+    bindSceneUrl,
+    clearSceneBinding,
+    clearLastBackground,
+    showImmediateBackground,
   };
 }
 
