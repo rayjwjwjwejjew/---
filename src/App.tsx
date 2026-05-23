@@ -19,7 +19,7 @@ import { queueImagePreload } from "./vnMedia";
 import { CORNER_IMG_URL, CREDITS_BLOCKS, QA_ITEMS, TITLE_SCREEN_BG } from "./vnContent";
 import { AssetsPanel, SettingsPanel } from "./vnPanels";
 import { buildExportSourceFiles } from "./vnSourceBundle";
-import { DustCanvas, RainCanvas, StageSprites } from "./vnVisuals";
+import { RainCanvas, StageSprites } from "./vnVisuals";
 import {
   useAudioRuntime,
   useBackgroundRuntime,
@@ -42,8 +42,10 @@ import {
   PlayingScene,
   PresentationOverlays,
   TitleQaPanel,
+  TitleLandingView,
   TitleScene,
   TitleSystemPanel,
+  WarningScene,
 } from "./vnScenes";
 import {
   buildDebugMarkers,
@@ -476,128 +478,27 @@ export function useVnRuntime() {
 
   return (
     <div id="app-root" className={lowPerfMode ? "low-perf" : ""}>
-      {phase === "warning" && (
-        <div id="warning-screen" onClick={() => setPhase("title")}>
-          <div id="warning-content" onClick={(event) => event.stopPropagation()}>
-            <div className="warning-badge">启动前提示</div>
-            <div className="warning-title">请先确认内容提醒</div>
-            <div id="warning-text">
-              <p>本游戏包含悬疑、暴力暗示与心理惊悚内容，建议成年或有监护同意的玩家体验。</p>
-              <p>故事涉及校园命案、创伤记忆与灵异叙事，请根据自己的接受程度决定是否继续。</p>
-              <p>如果你已经了解这些内容，可以进入标题界面。</p>
-            </div>
-            <button id="warning-btn" onClick={() => setPhase("title")}>
-              我已了解并继续
-            </button>
-          </div>
-        </div>
-      )}
+      {phase === "warning" && <WarningScene onContinue={() => setPhase("title")} />}
 
       {phase === "title" && (
         <TitleScene ready={titleReady}>
-          <div
-            className="title-bg"
-            style={{
-              backgroundImage: `url("${TITLE_SCREEN_BG}")`,
-              filter: "blur(4px)",
-              transform: "scale(1.08)",
-              opacity: 0.92,
-            }}
-          />
-          <div
-            className="title-overlay"
-            style={{
-              background:
-                "linear-gradient(180deg, rgba(4,8,18,0.30) 0%, rgba(4,8,18,0.54) 52%, rgba(4,8,18,0.72) 100%)",
-            }}
-          />
-          <div className="title-film title-film-top" />
-          <div className="title-film title-film-bottom" />
-          <div className="title-grid" />
-          <div className="title-glow title-glow-left" />
-          <div className="title-glow title-glow-right" />
-          <div className="title-sweep" />
-          <DustCanvas active={particlesEnabled} lowPerfMode={lowPerfMode} />
-
-          <div className="title-content">
-            <div className="title-kicker">悬疑视觉小说</div>
-            <div className="title-logo">
-              <div className="title-logo-core">
-                <div className="title-main-glow">盛开在谎言之上</div>
-                <div className="title-main">盛开在谎言之上</div>
-                <div className="title-divider">
-                  <span />
-                </div>
-                <div className="title-sub">——带你去极光尽头</div>
-                <div className="title-copy">凡盛放者，皆有所葬</div>
-              </div>
-            </div>
-            <div className="title-omen"></div>
-            <div className="title-menu">
-              <button className="title-btn" onClick={startNewGame}>
-                <span className="title-btn-icon">▶</span>
-                <span>开始游戏</span>
-              </button>
-              <button className="title-btn" onClick={continueLastGame} disabled={!hasContinueSave}>
-                <span className="title-btn-icon">↻</span>
-                <span>继续上次</span>
-              </button>
-              <button className="title-btn" onClick={() => setActivePanel("settings")}>
-                <span className="title-btn-icon">⚙</span>
-                <span>设置</span>
-              </button>
-              {workspaceMode === "editor" && (
-                <button className="title-btn" onClick={() => setActivePanel("assets")}>
-                  <span className="title-btn-icon">♫</span>
-                  <span>资源管理</span>
-                </button>
-              )}
-              <button className="title-btn" onClick={toggleWorkspaceMode}>
-                <span className="title-btn-icon">{workspaceMode === "editor" ? "✦" : "✎"}</span>
-                <span>{workspaceMode === "editor" ? "玩家模式" : "编辑器模式"}</span>
-              </button>
-            </div>
-            <div className="title-footer">
-              <span className="title-footer-line" />
-              <span>按空格开始</span>
-              <span className="title-footer-line" />
-            </div>
-          </div>
-
-          <button
-            type="button"
-            onClick={() => {
+          <TitleLandingView
+            titleBackgroundUrl={TITLE_SCREEN_BG}
+            particlesEnabled={particlesEnabled}
+            lowPerfMode={lowPerfMode}
+            hasContinueSave={hasContinueSave}
+            workspaceMode={workspaceMode}
+            cornerImageUrl={CORNER_IMG_URL}
+            onStartNewGame={startNewGame}
+            onContinueLastGame={continueLastGame}
+            onOpenSettings={() => setActivePanel("settings")}
+            onOpenAssets={() => setActivePanel("assets")}
+            onToggleWorkspaceMode={toggleWorkspaceMode}
+            onOpenQa={() => {
               setShowQaPanel(true);
               setOpenQaIndex(null);
             }}
-            style={{
-              position: "absolute",
-              right: "220px",
-              bottom: "120px",
-              width: "240px",
-              height: "240px",
-              border: "none",
-              padding: 0,
-              background: "transparent",
-              cursor: "pointer",
-              zIndex: 30,
-            }}
-            aria-label="打开问答"
-          >
-            <img
-              src={CORNER_IMG_URL}
-              alt="问答入口"
-              style={{
-                width: "100%",
-                height: "100%",
-                objectFit: "contain",
-                display: "block",
-                filter: "drop-shadow(0 12px 24px rgba(0,0,0,0.35))",
-                userSelect: "none",
-                pointerEvents: "none",
-              }}
-            />
-          </button>
+          />
 
           <TitleQaPanel
             items={QA_ITEMS}
