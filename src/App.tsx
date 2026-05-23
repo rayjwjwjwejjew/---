@@ -20,7 +20,7 @@ import {
   type Settings,
 } from "./vnCore";
 import { queueImagePreload } from "./vnMedia";
-import { AssetsPanel, BgmPanel, DebugPanel, SavePanel, SettingsPanel } from "./vnPanels";
+import { AssetsPanel, SettingsPanel } from "./vnPanels";
 import {
   useAudioRuntime,
   useBackgroundRuntime,
@@ -36,6 +36,7 @@ import {
   CreditsScene,
   DialogueHudView,
   PlaybackControlBar,
+  PlayingPanelsView,
   PlayingScene,
   PresentationOverlays,
   TitleQaPanel,
@@ -1148,163 +1149,118 @@ export function useVnRuntime() {
             onExportCode={handleExportAllCodeTxt}
           />
 
-          {isEditorMode && activePanel === "assets" && (
-            <div className="panel show">
-            <AssetsPanel
-              onUploadAsset={uploadAsset}
-              sceneQuery={sceneQuery}
-              onSceneQueryChange={setSceneQuery}
-              selectedSceneName={selectedSceneName}
-              onSelectedSceneNameChange={setSelectedSceneName}
-              filteredScenes={filteredScenes}
-              selectedBackgroundAssetId={selectedBackgroundAssetId}
-              onSelectedBackgroundAssetIdChange={setSelectedBackgroundAssetId}
-              backgroundAssetEntries={backgroundAssetEntries}
-              customSceneBgUrl={customSceneBgUrl}
-              onCustomSceneBgUrlChange={setCustomSceneBgUrl}
-              onPreviewSceneBackground={previewSceneBackground}
-              onApplySceneBackground={applySceneBackground}
-              onBindSceneUrl={bindSceneUrl}
-              onClearSceneBinding={clearSceneBinding}
-              currentBindingText={
-                selectedSceneName && sceneBgOverrides[selectedSceneName]
-                  ? `${sceneBgOverrides[selectedSceneName].source === "asset" ? "资源" : "URL"} · ${sceneBgOverrides[selectedSceneName].label}`
-                  : "未绑定"
+          <PlayingPanelsView
+            activePanel={activePanel}
+            isEditorMode={isEditorMode}
+            settings={settings}
+            currentIndex={index}
+            currentScene={curLine?.scene}
+            currentBgmName={currentBgmName}
+            currentEffect={curLine?.effect}
+            onSettingsChange={setSettings}
+            onSettingsReset={() => setSettings(DEFAULT_SETTINGS)}
+            onUploadAsset={uploadAsset}
+            sceneQuery={sceneQuery}
+            onSceneQueryChange={setSceneQuery}
+            selectedSceneName={selectedSceneName}
+            onSelectedSceneNameChange={setSelectedSceneName}
+            filteredScenes={filteredScenes}
+            selectedBackgroundAssetId={selectedBackgroundAssetId}
+            onSelectedBackgroundAssetIdChange={setSelectedBackgroundAssetId}
+            backgroundAssetEntries={backgroundAssetEntries}
+            customSceneBgUrl={customSceneBgUrl}
+            onCustomSceneBgUrlChange={setCustomSceneBgUrl}
+            onPreviewSceneBackground={previewSceneBackground}
+            onApplySceneBackground={applySceneBackground}
+            onBindSceneUrl={bindSceneUrl}
+            onClearSceneBinding={clearSceneBinding}
+            currentBindingText={
+              selectedSceneName && sceneBgOverrides[selectedSceneName]
+                ? `${sceneBgOverrides[selectedSceneName].source === "asset" ? "资源" : "URL"} · ${sceneBgOverrides[selectedSceneName].label}`
+                : "未绑定"
+            }
+            assetQuery={assetQuery}
+            onAssetQueryChange={setAssetQuery}
+            assetFilter={assetFilter}
+            onAssetFilterChange={setAssetFilter}
+            onBatchRename={batchRenameResources}
+            bgmCount={bgmList.length}
+            sfxCount={sfxList.length}
+            resourceEntries={resourceEntries}
+            filteredResources={filteredResources}
+            onCopyResourceName={(value) => {
+              navigator.clipboard?.writeText(value).catch(() => undefined);
+              setAssetQuery(value);
+            }}
+            resourcePage={resourcePage}
+            resourcePageCount={resourcePageCount}
+            resourceCount={filteredResources.length}
+            onResourcePageChange={setResourcePage}
+            selectedSaveSlot={selectedSaveSlot}
+            onSelectedSaveSlotChange={setSelectedSaveSlot}
+            onSaveCurrentSlot={() => saveGame(selectedSaveSlot, true)}
+            onUpdateContinue={() => saveGame(selectedSaveSlot, false)}
+            saveSlots={saveSlots}
+            getSavePreview={getSavePreview}
+            onSelectSlot={setSelectedSaveSlot}
+            onSaveSlot={(slotIndex) => saveGame(slotIndex, true)}
+            onLoadSlot={loadSaveSlot}
+            onDeleteSlot={deleteSaveSlot}
+            getSavedAtLabel={getSavedAtLabel}
+            debugMarkers={debugMarkers}
+            onJumpStart={() => {
+              setIndex(0);
+              setPhase("playing");
+              setActivePanel(null);
+              pulseUi("scene");
+            }}
+            onJumpRandom={() => {
+              const jump = debugMarkers[Math.floor(Math.random() * Math.max(1, debugMarkers.length))];
+              if (jump) {
+                setIndex(jump.idx);
+                setPhase("playing");
+                pulseUi("scene");
               }
-              assetQuery={assetQuery}
-              onAssetQueryChange={setAssetQuery}
-              assetFilter={assetFilter}
-              onAssetFilterChange={setAssetFilter}
-              onBatchRename={batchRenameResources}
-              bgmCount={bgmList.length}
-              sfxCount={sfxList.length}
-              resourceEntries={resourceEntries}
-              filteredResources={filteredResources}
-              onCopyResourceName={(value) => {
-                navigator.clipboard?.writeText(value).catch(() => undefined);
-                setAssetQuery(value);
-              }}
-              resourcePage={resourcePage}
-              resourcePageCount={resourcePageCount}
-              resourceCount={filteredResources.length}
-              onResourcePageChange={setResourcePage}
-            />
-            </div>
-          )}
-
-          {activePanel === "save" && (
-          <div className="panel show">
-            <SavePanel
-              selectedSaveSlot={selectedSaveSlot}
-              onSelectedSaveSlotChange={setSelectedSaveSlot}
-              onSaveCurrentSlot={() => saveGame(selectedSaveSlot, true)}
-              onUpdateContinue={() => saveGame(selectedSaveSlot, false)}
-              saveSlots={saveSlots}
-              getSavePreview={getSavePreview}
-              onSelectSlot={setSelectedSaveSlot}
-              onSaveSlot={(slotIndex) => saveGame(slotIndex, true)}
-              onLoadSlot={loadSaveSlot}
-              onDeleteSlot={deleteSaveSlot}
-              getSavedAtLabel={getSavedAtLabel}
-            />
-          </div>
-          )}
-
-          {isEditorMode && activePanel === "debug" && (
-            <div className="panel show">
-            <DebugPanel
-              debugMarkers={debugMarkers}
-              onJumpStart={() => {
-                setIndex(0);
-                setPhase("playing");
-                setActivePanel(null);
-                pulseUi("scene");
-              }}
-              onJumpRandom={() => {
-                const jump = debugMarkers[Math.floor(Math.random() * Math.max(1, debugMarkers.length))];
-                if (jump) {
-                  setIndex(jump.idx);
-                  setPhase("playing");
-                  pulseUi("scene");
-                }
-              }}
-              onTriggerCg={() => {
-                if (!curLine) return;
-                setCgImageUrl(bgUrl || DEFAULT_BG);
-                setCgVisible(true);
-                pulseUi("cg");
-              }}
-              onSwitchBg={() => {
-                const nextBg = bgUrl === TITLE_SCREEN_BG ? resolveSceneBackground(curLine?.scene) : TITLE_SCREEN_BG;
-                showImmediateBackground(nextBg);
-                pulseUi("scene");
-              }}
-              onSwitchEmotion={() => {
-                setDebugExpressionOverride((value) => (value === "panic" ? "calm" : "panic"));
-                pulseUi("emotion");
-              }}
-              onFlashWhite={() => {
-                triggerEffect("flash-white");
-                pulseUi("ui");
-              }}
-              onGoToMarker={(idx) => {
-                setIndex(idx);
-                setPhase("playing");
-                setActivePanel(null);
-                pulseUi("scene");
-              }}
-              debugPage={debugPage}
-              debugPageCount={debugPageCount}
-              debugCount={debugMarkers.length}
-              onDebugPageChange={setDebugPage}
-            />
-            </div>
-          )}
-
-          {activePanel === "settings" && (
-          <div className="panel show">
-            <SettingsPanel settings={settings} onChange={setSettings} onReset={() => setSettings(DEFAULT_SETTINGS)} />
-            <div className="card">
-              <div className="row">
-                <span className="label">场景信息</span>
-                <span className="tiny mono">
-                  #{index} · {curLine?.scene || "无场景标记"}
-                </span>
-              </div>
-              {currentBgmName && (
-                <div className="row">
-                  <span className="label">当前BGM</span>
-                  <span className="tiny mono">{currentBgmName}</span>
-                </div>
-              )}
-              {curLine?.effect && (
-                <div className="row">
-                  <span className="label">当前特效</span>
-                  <span className="tiny mono">{curLine.effect}</span>
-                </div>
-              )}
-            </div>
-          </div>
-          )}
-
-          {activePanel === "bgm" && (
-          <div className="panel show">
-            <BgmPanel
-              bgmPlaying={bgmPlaying}
-              bgmMuted={bgmMuted}
-              currentBgmLabel={currentBgmLabel}
-              currentBgmId={currentBgmId}
-              bgmList={bgmList}
-              bgmVol={settings.bgmVol}
-              sfxVol={settings.sfxVol}
-              onToggleBgm={toggleBgm}
-              onStopBgm={stopBgm}
-              onToggleMute={toggleMute}
-              onLoadAndPlayBgm={(id) => void loadAndPlayBgm(id)}
-              onSettingsChange={setSettings}
-            />
-          </div>
-          )}
+            }}
+            onTriggerCg={() => {
+              if (!curLine) return;
+              setCgImageUrl(bgUrl || DEFAULT_BG);
+              setCgVisible(true);
+              pulseUi("cg");
+            }}
+            onSwitchBg={() => {
+              const nextBg = bgUrl === TITLE_SCREEN_BG ? resolveSceneBackground(curLine?.scene) : TITLE_SCREEN_BG;
+              showImmediateBackground(nextBg);
+              pulseUi("scene");
+            }}
+            onSwitchEmotion={() => {
+              setDebugExpressionOverride((value) => (value === "panic" ? "calm" : "panic"));
+              pulseUi("emotion");
+            }}
+            onFlashWhite={() => {
+              triggerEffect("flash-white");
+              pulseUi("ui");
+            }}
+            onGoToMarker={(idx) => {
+              setIndex(idx);
+              setPhase("playing");
+              setActivePanel(null);
+              pulseUi("scene");
+            }}
+            debugPage={debugPage}
+            debugPageCount={debugPageCount}
+            debugCount={debugMarkers.length}
+            onDebugPageChange={setDebugPage}
+            bgmPlaying={bgmPlaying}
+            bgmMuted={bgmMuted}
+            currentBgmLabel={currentBgmLabel}
+            currentBgmId={currentBgmId}
+            bgmList={bgmList}
+            onToggleBgm={toggleBgm}
+            onStopBgm={stopBgm}
+            onToggleMute={toggleMute}
+            onLoadAndPlayBgm={(id) => void loadAndPlayBgm(id)}
+          />
 
           <DialogueHudView
             visible={Boolean(curLine)}

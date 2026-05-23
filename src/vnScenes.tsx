@@ -1,5 +1,7 @@
 import type { ReactNode } from "react";
 import type { ChoiceTone } from "./vnDerived";
+import type { AssetEntry, Manifest, SaveSlot, Settings } from "./vnCore";
+import { AssetsPanel, BgmPanel, DebugPanel, SavePanel, SettingsPanel } from "./vnPanels";
 
 type SceneShellProps = {
   id: string;
@@ -490,6 +492,282 @@ export function PresentationOverlays({
             <div className="opening-prelude-title">{openingPreludeText}</div>
             <div className="opening-prelude-copy">黑场、字幕、环境音和轻微推进，正在把这一幕正式拉开。</div>
           </div>
+        </div>
+      )}
+    </>
+  );
+}
+
+type DebugMarker = {
+  line: { kind: string; text?: string; name?: string; speaker?: string };
+  idx: number;
+};
+
+type PlayingPanelsViewProps = {
+  activePanel: string | null;
+  isEditorMode: boolean;
+  settings: Settings;
+  currentIndex: number;
+  currentScene?: string;
+  currentBgmName: string;
+  currentEffect?: string;
+  onSettingsChange: (updater: (value: Settings) => Settings) => void;
+  onSettingsReset: () => void;
+  onUploadAsset: (kind: "bg" | "sprite" | "video" | "bgm" | "sfx") => void;
+  sceneQuery: string;
+  onSceneQueryChange: (value: string) => void;
+  selectedSceneName: string;
+  onSelectedSceneNameChange: (value: string) => void;
+  filteredScenes: string[];
+  selectedBackgroundAssetId: string;
+  onSelectedBackgroundAssetIdChange: (value: string) => void;
+  backgroundAssetEntries: AssetEntry[];
+  customSceneBgUrl: string;
+  onCustomSceneBgUrlChange: (value: string) => void;
+  onPreviewSceneBackground: (scene: string) => void;
+  onApplySceneBackground: (scene: string, assetId: string | null) => void;
+  onBindSceneUrl: (scene: string, url: string) => void;
+  onClearSceneBinding: (scene: string) => void;
+  currentBindingText: string;
+  assetQuery: string;
+  onAssetQueryChange: (value: string) => void;
+  assetFilter: keyof Manifest | "all";
+  onAssetFilterChange: (value: keyof Manifest | "all") => void;
+  onBatchRename: () => void;
+  bgmCount: number;
+  sfxCount: number;
+  resourceEntries: { kind: keyof Manifest | "all"; id: string; label: string }[];
+  filteredResources: { kind: keyof Manifest | "all"; id: string; label: string }[];
+  onCopyResourceName: (value: string) => void;
+  resourcePage: number;
+  resourcePageCount: number;
+  resourceCount: number;
+  onResourcePageChange: (value: number) => void;
+  selectedSaveSlot: number;
+  onSelectedSaveSlotChange: (value: number) => void;
+  onSaveCurrentSlot: () => void;
+  onUpdateContinue: () => void;
+  saveSlots: Array<SaveSlot | null>;
+  getSavePreview: (slot: SaveSlot | null, index: number) => { imageUrl: string; location: string; excerpt: string } | null;
+  onSelectSlot: (value: number) => void;
+  onSaveSlot: (value: number) => void;
+  onLoadSlot: (value: number) => void;
+  onDeleteSlot: (value: number) => void;
+  getSavedAtLabel: (savedAt: string) => string;
+  debugMarkers: DebugMarker[];
+  onJumpStart: () => void;
+  onJumpRandom: () => void;
+  onTriggerCg: () => void;
+  onSwitchBg: () => void;
+  onSwitchEmotion: () => void;
+  onFlashWhite: () => void;
+  onGoToMarker: (idx: number) => void;
+  debugPage: number;
+  debugPageCount: number;
+  debugCount: number;
+  onDebugPageChange: (value: number) => void;
+  bgmPlaying: boolean;
+  bgmMuted: boolean;
+  currentBgmLabel: string;
+  currentBgmId: string;
+  bgmList: { id: string; label: string }[];
+  onToggleBgm: () => void;
+  onStopBgm: () => void;
+  onToggleMute: () => void;
+  onLoadAndPlayBgm: (id: string) => void;
+};
+
+export function PlayingPanelsView({
+  activePanel,
+  isEditorMode,
+  settings,
+  currentIndex,
+  currentScene,
+  currentBgmName,
+  currentEffect,
+  onSettingsChange,
+  onSettingsReset,
+  onUploadAsset,
+  sceneQuery,
+  onSceneQueryChange,
+  selectedSceneName,
+  onSelectedSceneNameChange,
+  filteredScenes,
+  selectedBackgroundAssetId,
+  onSelectedBackgroundAssetIdChange,
+  backgroundAssetEntries,
+  customSceneBgUrl,
+  onCustomSceneBgUrlChange,
+  onPreviewSceneBackground,
+  onApplySceneBackground,
+  onBindSceneUrl,
+  onClearSceneBinding,
+  currentBindingText,
+  assetQuery,
+  onAssetQueryChange,
+  assetFilter,
+  onAssetFilterChange,
+  onBatchRename,
+  bgmCount,
+  sfxCount,
+  resourceEntries,
+  filteredResources,
+  onCopyResourceName,
+  resourcePage,
+  resourcePageCount,
+  resourceCount,
+  onResourcePageChange,
+  selectedSaveSlot,
+  onSelectedSaveSlotChange,
+  onSaveCurrentSlot,
+  onUpdateContinue,
+  saveSlots,
+  getSavePreview,
+  onSelectSlot,
+  onSaveSlot,
+  onLoadSlot,
+  onDeleteSlot,
+  getSavedAtLabel,
+  debugMarkers,
+  onJumpStart,
+  onJumpRandom,
+  onTriggerCg,
+  onSwitchBg,
+  onSwitchEmotion,
+  onFlashWhite,
+  onGoToMarker,
+  debugPage,
+  debugPageCount,
+  debugCount,
+  onDebugPageChange,
+  bgmPlaying,
+  bgmMuted,
+  currentBgmLabel,
+  currentBgmId,
+  bgmList,
+  onToggleBgm,
+  onStopBgm,
+  onToggleMute,
+  onLoadAndPlayBgm,
+}: PlayingPanelsViewProps) {
+  return (
+    <>
+      {isEditorMode && activePanel === "assets" && (
+        <div className="panel show">
+          <AssetsPanel
+            onUploadAsset={onUploadAsset}
+            sceneQuery={sceneQuery}
+            onSceneQueryChange={onSceneQueryChange}
+            selectedSceneName={selectedSceneName}
+            onSelectedSceneNameChange={onSelectedSceneNameChange}
+            filteredScenes={filteredScenes}
+            selectedBackgroundAssetId={selectedBackgroundAssetId}
+            onSelectedBackgroundAssetIdChange={onSelectedBackgroundAssetIdChange}
+            backgroundAssetEntries={backgroundAssetEntries}
+            customSceneBgUrl={customSceneBgUrl}
+            onCustomSceneBgUrlChange={onCustomSceneBgUrlChange}
+            onPreviewSceneBackground={onPreviewSceneBackground}
+            onApplySceneBackground={onApplySceneBackground}
+            onBindSceneUrl={onBindSceneUrl}
+            onClearSceneBinding={onClearSceneBinding}
+            currentBindingText={currentBindingText}
+            assetQuery={assetQuery}
+            onAssetQueryChange={onAssetQueryChange}
+            assetFilter={assetFilter}
+            onAssetFilterChange={onAssetFilterChange}
+            onBatchRename={onBatchRename}
+            bgmCount={bgmCount}
+            sfxCount={sfxCount}
+            resourceEntries={resourceEntries}
+            filteredResources={filteredResources}
+            onCopyResourceName={onCopyResourceName}
+            resourcePage={resourcePage}
+            resourcePageCount={resourcePageCount}
+            resourceCount={resourceCount}
+            onResourcePageChange={onResourcePageChange}
+          />
+        </div>
+      )}
+
+      {activePanel === "save" && (
+        <div className="panel show">
+          <SavePanel
+            selectedSaveSlot={selectedSaveSlot}
+            onSelectedSaveSlotChange={onSelectedSaveSlotChange}
+            onSaveCurrentSlot={onSaveCurrentSlot}
+            onUpdateContinue={onUpdateContinue}
+            saveSlots={saveSlots}
+            getSavePreview={getSavePreview}
+            onSelectSlot={onSelectSlot}
+            onSaveSlot={onSaveSlot}
+            onLoadSlot={onLoadSlot}
+            onDeleteSlot={onDeleteSlot}
+            getSavedAtLabel={getSavedAtLabel}
+          />
+        </div>
+      )}
+
+      {isEditorMode && activePanel === "debug" && (
+        <div className="panel show">
+          <DebugPanel
+            debugMarkers={debugMarkers}
+            onJumpStart={onJumpStart}
+            onJumpRandom={onJumpRandom}
+            onTriggerCg={onTriggerCg}
+            onSwitchBg={onSwitchBg}
+            onSwitchEmotion={onSwitchEmotion}
+            onFlashWhite={onFlashWhite}
+            onGoToMarker={onGoToMarker}
+            debugPage={debugPage}
+            debugPageCount={debugPageCount}
+            debugCount={debugCount}
+            onDebugPageChange={onDebugPageChange}
+          />
+        </div>
+      )}
+
+      {activePanel === "settings" && (
+        <div className="panel show">
+          <SettingsPanel settings={settings} onChange={onSettingsChange} onReset={onSettingsReset} />
+          <div className="card">
+            <div className="row">
+              <span className="label">场景信息</span>
+              <span className="tiny mono">
+                #{currentIndex} · {currentScene || "无场景标记"}
+              </span>
+            </div>
+            {currentBgmName && (
+              <div className="row">
+                <span className="label">当前BGM</span>
+                <span className="tiny mono">{currentBgmName}</span>
+              </div>
+            )}
+            {currentEffect && (
+              <div className="row">
+                <span className="label">当前特效</span>
+                <span className="tiny mono">{currentEffect}</span>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {activePanel === "bgm" && (
+        <div className="panel show">
+          <BgmPanel
+            bgmPlaying={bgmPlaying}
+            bgmMuted={bgmMuted}
+            currentBgmLabel={currentBgmLabel}
+            currentBgmId={currentBgmId}
+            bgmList={bgmList}
+            bgmVol={settings.bgmVol}
+            sfxVol={settings.sfxVol}
+            onToggleBgm={onToggleBgm}
+            onStopBgm={onStopBgm}
+            onToggleMute={onToggleMute}
+            onLoadAndPlayBgm={onLoadAndPlayBgm}
+            onSettingsChange={onSettingsChange}
+          />
         </div>
       )}
     </>
