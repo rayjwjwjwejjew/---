@@ -29,6 +29,7 @@ import {
 } from "./vnCore";
 import { ensureImageReady, queueImagePreload } from "./vnMedia";
 import { AssetsPanel, BgmPanel, DebugPanel, SavePanel, SettingsPanel } from "./vnPanels";
+import { useAudioRuntime } from "./vnRuntime";
 import { CreditsScene, PlayingScene, TitleScene } from "./vnScenes";
 import {
   buildDebugMarkers,
@@ -41,8 +42,6 @@ import {
   getChoiceTone,
   getChoiceToneLabel,
   getDialogueTone,
-  getBgmMoodClass,
-  getCurrentBgmLabel,
   getSceneProgress,
   isEmphasisLine,
 } from "./vnDerived";
@@ -408,10 +407,6 @@ export function useVnRuntime() {
   const [sceneBlur, setSceneBlur] = useState(false);
   const [debugExpressionOverride, setDebugExpressionOverride] = useState<"calm" | "panic" | null>(null);
   const [spriteReadyMap, setSpriteReadyMap] = useState<Record<string, boolean>>({});
-  const [bgmPlaying, setBgmPlaying] = useState(false);
-  const [bgmMuted, setBgmMuted] = useState(false);
-  const [currentBgmId, setCurrentBgmId] = useState("");
-  const [currentBgmName, setCurrentBgmName] = useState("");
   const [bgmList, setBgmList] = useState<{ id: string; label: string }[]>([]);
   const [sfxList, setSfxList] = useState<{ id: string; label: string }[]>([]);
   const [titleReady, setTitleReady] = useState(false);
@@ -452,11 +447,6 @@ export function useVnRuntime() {
   const hudSleepRef = useRef<number | null>(null);
   const lastBgRef = useRef("");
   const codeTxtUrlRef = useRef("");
-  const bgmRef = useRef<HTMLAudioElement>(new Audio());
-  const bgmFadeRef = useRef<HTMLAudioElement>(new Audio());
-  const sfxRef = useRef<HTMLAudioElement>(new Audio());
-  const bgmUrlRef = useRef("");
-  const sfxUrlRef = useRef("");
   const cgVideoUrlRef = useRef("");
   const cgVideoRef = useRef<HTMLVideoElement>(null);
   const bgAssetUrlCacheRef = useRef<Record<string, string>>({});
@@ -501,12 +491,22 @@ export function useVnRuntime() {
   }, []);
 
   const curLine = SCRIPT.lines[index];
-
-  useEffect(() => {
-    bgmRef.current.loop = true;
-    bgmFadeRef.current.loop = true;
-    sfxRef.current.preload = "auto";
-  }, []);
+  const {
+    bgmPlaying,
+    bgmMuted,
+    currentBgmId,
+    currentBgmName,
+    currentBgmLabel,
+    bgmMoodClass,
+    toggleBgm,
+    stopBgm,
+    toggleMute,
+    loadAndPlayBgm,
+    crossfadeBgm,
+    playSfx,
+    setCurrentBgmId,
+    setCurrentBgmName,
+  } = useAudioRuntime({ settings, bgmList });
 
   useEffect(() => {
     const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -928,117 +928,6 @@ export function useVnRuntime() {
     void video.play().catch(() => undefined);
   }, [cgMediaKind, cgVisible, cgVideoUrl]);
 
-  const crossfadeBgm = useCallback(
-    async (assetId: string, name: string) => {
-      if (!assetId) return;
-      try {
-        const blob = await AssetDB.get<Blob>(AssetDB.STORE_ASSETS, assetId);
-        if (!blob) return;
-
-        if (bgmRef.current.src && bgmPlaying) {
-          const oldAudio = bgmRef.current;
-          const fadeOut = window.setInterval(() => {
-            if (oldAudio.volume > 0.05) {
-              oldAudio.volume = Math.max(0, oldAudio.volume - 0.05);
-            } else {
-              oldAudio.pause();
-              window.clearInterval(fadeOut);
-            }
-          }, 50);
-        }
-
-        if (bgmUrlRef.current) URL.revokeObjectURL(bgmUrlRef.current);
-        const url = URL.createObjectURL(blob);
-        bgmUrlRef.current = url;
-
-        bgmFadeRef.current.src = url;
-        bgmFadeRef.current.volume = 0;
-        bgmFadeRef.current.muted = bgmMuted;
-        await bgmFadeRef.current.play().catch(() => undefined);
-
-        const targetVol = settings.bgmVol / 100;
-        const fadeIn = window.setInterval(() => {
-          if (bgmFadeRef.current.volume < targetVol - 0.05) {
-            bgmFadeRef.current.volume = Math.min(targetVol, bgmFadeRef.current.volume + 0.05);
-          } else {
-            bgmFadeRef.current.volume = targetVol;
-            window.clearInterval(fadeIn);
-          }
-        }, 50);
-
-        const temp = bgmRef.current;
-        bgmRef.current = bgmFadeRef.current;
-        bgmFadeRef.current = temp;
-        setBgmPlaying(true);
-        setCurrentBgmId(assetId);
-        setCurrentBgmName(name);
-      } catch {
-        // ignore autoplay and blob issues
-      }
-    },
-    [bgmMuted, bgmPlaying, settings.bgmVol],
-  );
-
-  const stopBgm = useCallback(() => {
-    bgmRef.current.pause();
-    bgmRef.current.currentTime = 0;
-    if (bgmUrlRef.current) {
-      URL.revokeObjectURL(bgmUrlRef.current);
-      bgmUrlRef.current = "";
-    }
-    bgmRef.current.removeAttribute("src");
-    setBgmPlaying(false);
-    setCurrentBgmId("");
-    setCurrentBgmName("");
-  }, []);
-
-  const loadAndPlayBgm = useCallback(
-    async (assetId: string) => {
-      if (!assetId) {
-        stopBgm();
-        return;
-      }
-      try {
-        const blob = await AssetDB.get<Blob>(AssetDB.STORE_ASSETS, assetId);
-        if (!blob) return;
-        if (bgmUrlRef.current) URL.revokeObjectURL(bgmUrlRef.current);
-        const url = URL.createObjectURL(blob);
-        bgmUrlRef.current = url;
-        bgmRef.current.src = url;
-        bgmRef.current.volume = settings.bgmVol / 100;
-        bgmRef.current.muted = bgmMuted;
-        await bgmRef.current.play().catch(() => undefined);
-        setBgmPlaying(true);
-        setCurrentBgmId(assetId);
-        const match = bgmList.find((item) => item.id === assetId);
-        setCurrentBgmName(match?.label || "");
-      } catch {
-        // ignore
-      }
-    },
-    [bgmList, bgmMuted, settings.bgmVol, stopBgm],
-  );
-
-  const playSfx = useCallback(
-    async (assetId: string) => {
-      if (!assetId) return;
-      try {
-        const blob = await AssetDB.get<Blob>(AssetDB.STORE_ASSETS, assetId);
-        if (!blob) return;
-        if (sfxUrlRef.current) URL.revokeObjectURL(sfxUrlRef.current);
-        const url = URL.createObjectURL(blob);
-        sfxUrlRef.current = url;
-        sfxRef.current.src = url;
-        sfxRef.current.volume = settings.sfxVol / 100;
-        sfxRef.current.currentTime = 0;
-        await sfxRef.current.play().catch(() => undefined);
-      } catch {
-        // ignore
-      }
-    },
-    [settings.sfxVol],
-  );
-
   useEffect(() => {
     if (phase !== "playing" || !curLine?.bgm) return;
     if (curLine.bgm === currentBgmName) return;
@@ -1353,24 +1242,6 @@ export function useVnRuntime() {
     }, lowPerfMode ? 620 : 720);
   };
 
-  const toggleBgm = useCallback(() => {
-    if (bgmPlaying) {
-      bgmRef.current.pause();
-      setBgmPlaying(false);
-      return;
-    }
-    if (bgmRef.current.src) {
-      void bgmRef.current.play().then(() => setBgmPlaying(true)).catch(() => undefined);
-    }
-  }, [bgmPlaying]);
-
-  const toggleMute = useCallback(() => {
-    const next = !bgmMuted;
-    bgmRef.current.muted = next;
-    bgmFadeRef.current.muted = next;
-    setBgmMuted(next);
-  }, [bgmMuted]);
-
   const togglePanel = (name: string) => {
     if (!isEditorMode && (name === "assets" || name === "debug")) return;
     pulseUi("ui");
@@ -1541,8 +1412,6 @@ export function useVnRuntime() {
   useEffect(() => {
     return () => {
       if (codeTxtUrlRef.current) URL.revokeObjectURL(codeTxtUrlRef.current);
-      if (bgmUrlRef.current) URL.revokeObjectURL(bgmUrlRef.current);
-      if (sfxUrlRef.current) URL.revokeObjectURL(sfxUrlRef.current);
       if (cgVideoUrlRef.current) URL.revokeObjectURL(cgVideoUrlRef.current);
       Object.values(bgAssetUrlCacheRef.current).forEach((url) => URL.revokeObjectURL(url));
       if (cgCloseTimerRef.current) window.clearTimeout(cgCloseTimerRef.current);
@@ -1574,11 +1443,6 @@ export function useVnRuntime() {
   const dialogueTone = getDialogueTone(curLine);
   const emphasisLine = isEmphasisLine(curLine?.text);
   const cgCaption = getCgCaption(currentAct, curLine);
-  const currentBgmLabel = useMemo(
-    () => getCurrentBgmLabel(bgmList, currentBgmId, currentBgmName),
-    [bgmList, currentBgmId, currentBgmName],
-  );
-  const bgmMoodClass = useMemo(() => getBgmMoodClass(currentBgmLabel), [currentBgmLabel]);
   const sceneProgress = useMemo(() => getSceneProgress(index, SCRIPT.lines.length), [index]);
   const titlePanelOpen = useMemo(
     () => phase === "title" && (activePanel === "settings" || (isEditorMode && activePanel === "assets")),
