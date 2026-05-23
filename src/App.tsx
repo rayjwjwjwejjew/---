@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./index.css";
 import {
   CHARACTER_COLORS,
@@ -406,7 +406,7 @@ export function useVnRuntime() {
   const [effectActive, setEffectActive] = useState("");
   const [showRain, setShowRain] = useState(false);
   const [sceneBlur, setSceneBlur] = useState(false);
-  const [stageChars, setStageChars] = useState<StageCharacter[]>([]);
+  const [debugExpressionOverride, setDebugExpressionOverride] = useState<"calm" | "panic" | null>(null);
   const [spriteReadyMap, setSpriteReadyMap] = useState<Record<string, boolean>>({});
   const [bgmPlaying, setBgmPlaying] = useState(false);
   const [bgmMuted, setBgmMuted] = useState(false);
@@ -900,8 +900,10 @@ export function useVnRuntime() {
 
   useEffect(() => {
     if (phase !== "playing" || !curLine) return;
-    setStageChars(getSceneCharacters(SCRIPT.lines, index, curLine.speaker));
     const upcoming = new Set<string>();
+    getSceneCharacters(SCRIPT.lines, index, curLine.speaker).forEach((ch) => {
+      upcoming.add(ch.spriteUrl);
+    });
     const nextLine = SCRIPT.lines[index + 1];
     if (nextLine) {
       getSceneCharacters(SCRIPT.lines, index + 1, nextLine.speaker).forEach((ch) => {
@@ -911,7 +913,9 @@ export function useVnRuntime() {
     upcoming.forEach((url) => {
       queueImagePreload(url);
       void ensureImageReady(url).then(() => {
-        setSpriteReadyMap((prev) => (prev[url] ? prev : { ...prev, [url]: true }));
+        startTransition(() => {
+          setSpriteReadyMap((prev) => (prev[url] ? prev : { ...prev, [url]: true }));
+        });
       });
     });
   }, [curLine, index, phase]);
@@ -1561,6 +1565,12 @@ export function useVnRuntime() {
   const speaker = curLine?.speaker;
   const showName = Boolean(speaker && speaker !== "旁白" && speaker !== "SYSTEM");
   const speakerColor = speaker ? CHARACTER_COLORS[speaker] || "rgba(255,241,248,0.96)" : "rgba(255,241,248,0.96)";
+  const stageChars = useMemo(() => {
+    if (phase !== "playing" || !curLine) return [];
+    const chars = getSceneCharacters(SCRIPT.lines, index, curLine.speaker);
+    if (!debugExpressionOverride) return chars;
+    return chars.map((ch) => ({ ...ch, expression: debugExpressionOverride }));
+  }, [curLine, debugExpressionOverride, index, phase]);
   const dialogueTone = getDialogueTone(curLine);
   const emphasisLine = isEmphasisLine(curLine?.text);
   const cgCaption = getCgCaption(currentAct, curLine);
@@ -2094,8 +2104,8 @@ export function useVnRuntime() {
             )}
           </div>
 
-          {isEditorMode && (
-            <div className={`panel ${activePanel === "assets" ? "show" : ""}`}>
+          {isEditorMode && activePanel === "assets" && (
+            <div className="panel show">
             <AssetsPanel
               onUploadAsset={uploadAsset}
               sceneQuery={sceneQuery}
@@ -2138,7 +2148,8 @@ export function useVnRuntime() {
             </div>
           )}
 
-          <div className={`panel ${activePanel === "save" ? "show" : ""}`}>
+          {activePanel === "save" && (
+          <div className="panel show">
             <SavePanel
               selectedSaveSlot={selectedSaveSlot}
               onSelectedSaveSlotChange={setSelectedSaveSlot}
@@ -2153,9 +2164,10 @@ export function useVnRuntime() {
               getSavedAtLabel={getSavedAtLabel}
             />
           </div>
+          )}
 
-          {isEditorMode && (
-            <div className={`panel ${activePanel === "debug" ? "show" : ""}`}>
+          {isEditorMode && activePanel === "debug" && (
+            <div className="panel show">
             <DebugPanel
               debugMarkers={debugMarkers}
               onJumpStart={() => {
@@ -2185,12 +2197,7 @@ export function useVnRuntime() {
                 pulseUi("scene");
               }}
               onSwitchEmotion={() => {
-                setStageChars((prev) =>
-                  prev.map((ch) => ({
-                    ...ch,
-                    expression: ch.expression === "panic" ? "calm" : "panic",
-                  })),
-                );
+                setDebugExpressionOverride((value) => (value === "panic" ? "calm" : "panic"));
                 pulseUi("emotion");
               }}
               onFlashWhite={() => {
@@ -2211,7 +2218,8 @@ export function useVnRuntime() {
             </div>
           )}
 
-          <div className={`panel ${activePanel === "settings" ? "show" : ""}`}>
+          {activePanel === "settings" && (
+          <div className="panel show">
             <SettingsPanel settings={settings} onChange={setSettings} onReset={() => setSettings(DEFAULT_SETTINGS)} />
             <div className="card">
               <div className="row">
@@ -2234,8 +2242,10 @@ export function useVnRuntime() {
               )}
             </div>
           </div>
+          )}
 
-          <div className={`panel ${activePanel === "bgm" ? "show" : ""}`}>
+          {activePanel === "bgm" && (
+          <div className="panel show">
             <BgmPanel
               bgmPlaying={bgmPlaying}
               bgmMuted={bgmMuted}
@@ -2251,6 +2261,7 @@ export function useVnRuntime() {
               onSettingsChange={setSettings}
             />
           </div>
+          )}
 
           <div id="hud" style={{ display: curLine ? "block" : "none" }}>
             <div
