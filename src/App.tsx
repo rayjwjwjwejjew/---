@@ -1,11 +1,10 @@
-import { memo, startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./index.css";
 import {
   CHARACTER_COLORS,
   DEFAULT_BG,
   SCRIPT,
   getSceneBg,
-  getSceneCharacters,
   getSpecialBg,
 } from "./engine";
 import type { StageCharacter } from "./engine";
@@ -29,7 +28,7 @@ import {
 } from "./vnCore";
 import { ensureImageReady, queueImagePreload } from "./vnMedia";
 import { AssetsPanel, BgmPanel, DebugPanel, SavePanel, SettingsPanel } from "./vnPanels";
-import { useAudioRuntime } from "./vnRuntime";
+import { isKeySceneTransition, useAudioRuntime, useSceneRuntime } from "./vnRuntime";
 import { CreditsScene, PlayingScene, TitleScene } from "./vnScenes";
 import {
   buildDebugMarkers,
@@ -144,26 +143,6 @@ function getCodeFenceLanguage(path: string): string {
   if (path.endsWith(".md")) return "md";
   if (path.endsWith(".d.ts")) return "ts";
   return "text";
-}
-
-function isKeySceneTransition(line?: (typeof SCRIPT.lines)[number]) {
-  if (!line) return false;
-  if (line.kind === "title" || line.cg) return true;
-  if (line.transition && !["none", "cut"].includes(line.transition)) return true;
-  if (line.effect && !["none", "rain", "blur"].includes(line.effect)) return true;
-  if (line.scene && /(梦境|回忆|地下室|暴雨|黎明|医院|审判|终章|尾声)/.test(line.scene)) return true;
-  return false;
-}
-
-function findNextScenePreviewUrl(startIndex: number, resolver: (scene: string | undefined) => string) {
-  const currentScene = SCRIPT.lines[startIndex]?.scene;
-  for (let i = startIndex + 1; i < Math.min(SCRIPT.lines.length, startIndex + 12); i += 1) {
-    const nextScene = SCRIPT.lines[i]?.scene;
-    if (nextScene && nextScene !== currentScene) {
-      return resolver(nextScene);
-    }
-  }
-  return "";
 }
 
 const RainCanvas = memo(function RainCanvas({
@@ -406,7 +385,6 @@ export function useVnRuntime() {
   const [showRain, setShowRain] = useState(false);
   const [sceneBlur, setSceneBlur] = useState(false);
   const [debugExpressionOverride, setDebugExpressionOverride] = useState<"calm" | "panic" | null>(null);
-  const [spriteReadyMap, setSpriteReadyMap] = useState<Record<string, boolean>>({});
   const [bgmList, setBgmList] = useState<{ id: string; label: string }[]>([]);
   const [sfxList, setSfxList] = useState<{ id: string; label: string }[]>([]);
   const [titleReady, setTitleReady] = useState(false);
@@ -747,14 +725,6 @@ export function useVnRuntime() {
   }, []);
 
   useEffect(() => {
-    if (phase !== "playing") return;
-    const nextBgUrl = findNextScenePreviewUrl(index, resolveSceneBackground);
-    if (!nextBgUrl) return;
-    queueImagePreload(nextBgUrl);
-    void ensureImageReady(nextBgUrl);
-  }, [index, phase, resolveSceneBackground]);
-
-  useEffect(() => {
     if (phase !== "playing" || !curLine) return;
     let nextBg = resolveSceneBackground(curLine.scene);
     const special = getSpecialBg(index);
@@ -897,28 +867,6 @@ export function useVnRuntime() {
       cancelled = true;
     };
   }, [bgUrl, cgVisible, curLine, index, manifestState.video, phase, pulseUi]);
-
-  useEffect(() => {
-    if (phase !== "playing" || !curLine) return;
-    const upcoming = new Set<string>();
-    getSceneCharacters(SCRIPT.lines, index, curLine.speaker).forEach((ch) => {
-      upcoming.add(ch.spriteUrl);
-    });
-    const nextLine = SCRIPT.lines[index + 1];
-    if (nextLine) {
-      getSceneCharacters(SCRIPT.lines, index + 1, nextLine.speaker).forEach((ch) => {
-        upcoming.add(ch.spriteUrl);
-      });
-    }
-    upcoming.forEach((url) => {
-      queueImagePreload(url);
-      void ensureImageReady(url).then(() => {
-        startTransition(() => {
-          setSpriteReadyMap((prev) => (prev[url] ? prev : { ...prev, [url]: true }));
-        });
-      });
-    });
-  }, [curLine, index, phase]);
 
   useEffect(() => {
     if (!cgVisible || cgMediaKind !== "video") return;
@@ -1434,12 +1382,13 @@ export function useVnRuntime() {
   const speaker = curLine?.speaker;
   const showName = Boolean(speaker && speaker !== "旁白" && speaker !== "SYSTEM");
   const speakerColor = speaker ? CHARACTER_COLORS[speaker] || "rgba(255,241,248,0.96)" : "rgba(255,241,248,0.96)";
-  const stageChars = useMemo(() => {
-    if (phase !== "playing" || !curLine) return [];
-    const chars = getSceneCharacters(SCRIPT.lines, index, curLine.speaker);
-    if (!debugExpressionOverride) return chars;
-    return chars.map((ch) => ({ ...ch, expression: debugExpressionOverride }));
-  }, [curLine, debugExpressionOverride, index, phase]);
+  const { stageChars, spriteReadyMap } = useSceneRuntime({
+    index,
+    line: curLine,
+    phase,
+    resolveSceneBackground,
+    debugExpressionOverride,
+  });
   const dialogueTone = getDialogueTone(curLine);
   const emphasisLine = isEmphasisLine(curLine?.text);
   const cgCaption = getCgCaption(currentAct, curLine);

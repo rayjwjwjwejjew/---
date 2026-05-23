@@ -1,5 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AssetDB } from "./db";
+import { SCRIPT, getSceneCharacters } from "./engine";
+import type { StageCharacter } from "./engine";
+import { ensureImageReady, queueImagePreload } from "./vnMedia";
 import { getBgmMoodClass, getCurrentBgmLabel } from "./vnDerived";
 import type { Settings } from "./vnCore";
 
@@ -9,6 +12,88 @@ type UseAudioRuntimeArgs = {
   settings: Settings;
   bgmList: AudioItem[];
 };
+
+type ScriptLine = (typeof SCRIPT.lines)[number];
+
+type UseSceneRuntimeArgs = {
+  index: number;
+  line?: ScriptLine;
+  phase: string;
+  resolveSceneBackground: (scene: string | undefined) => string;
+  debugExpressionOverride: "calm" | "panic" | null;
+};
+
+export function isKeySceneTransition(line?: ScriptLine) {
+  if (!line) return false;
+  if (line.kind === "title" || line.cg) return true;
+  if (line.transition && !["none", "cut"].includes(line.transition)) return true;
+  if (line.effect && !["none", "rain", "blur"].includes(line.effect)) return true;
+  if (line.scene && /(梦境|回忆|地下室|暴雨|黎明|医院|审判|终章|尾声)/.test(line.scene)) return true;
+  return false;
+}
+
+export function findNextScenePreviewUrl(startIndex: number, resolver: (scene: string | undefined) => string) {
+  const currentScene = SCRIPT.lines[startIndex]?.scene;
+  for (let i = startIndex + 1; i < Math.min(SCRIPT.lines.length, startIndex + 12); i += 1) {
+    const nextScene = SCRIPT.lines[i]?.scene;
+    if (nextScene && nextScene !== currentScene) {
+      return resolver(nextScene);
+    }
+  }
+  return "";
+}
+
+export function useSceneRuntime({
+  index,
+  line,
+  phase,
+  resolveSceneBackground,
+  debugExpressionOverride,
+}: UseSceneRuntimeArgs) {
+  const [spriteReadyMap, setSpriteReadyMap] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (phase !== "playing") return;
+    const nextBgUrl = findNextScenePreviewUrl(index, resolveSceneBackground);
+    if (!nextBgUrl) return;
+    queueImagePreload(nextBgUrl);
+    void ensureImageReady(nextBgUrl);
+  }, [index, phase, resolveSceneBackground]);
+
+  useEffect(() => {
+    if (phase !== "playing" || !line) return;
+    const upcoming = new Set<string>();
+    getSceneCharacters(SCRIPT.lines, index, line.speaker).forEach((ch) => {
+      upcoming.add(ch.spriteUrl);
+    });
+    const nextLine = SCRIPT.lines[index + 1];
+    if (nextLine) {
+      getSceneCharacters(SCRIPT.lines, index + 1, nextLine.speaker).forEach((ch) => {
+        upcoming.add(ch.spriteUrl);
+      });
+    }
+    upcoming.forEach((url) => {
+      queueImagePreload(url);
+      void ensureImageReady(url).then(() => {
+        startTransition(() => {
+          setSpriteReadyMap((prev) => (prev[url] ? prev : { ...prev, [url]: true }));
+        });
+      });
+    });
+  }, [index, line, phase]);
+
+  const stageChars = useMemo<StageCharacter[]>(() => {
+    if (phase !== "playing" || !line) return [];
+    const chars = getSceneCharacters(SCRIPT.lines, index, line.speaker);
+    if (!debugExpressionOverride) return chars;
+    return chars.map((ch) => ({ ...ch, expression: debugExpressionOverride }));
+  }, [debugExpressionOverride, index, line, phase]);
+
+  return {
+    spriteReadyMap,
+    stageChars,
+  };
+}
 
 export function useAudioRuntime({ settings, bgmList }: UseAudioRuntimeArgs) {
   const [bgmPlaying, setBgmPlaying] = useState(false);
