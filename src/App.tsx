@@ -14,16 +14,21 @@ import {
   getSavedAtLabel,
   normalizeManifest,
   readJson,
-  readSaveSlots,
   STORAGE_KEYS,
   type Manifest,
   type SaveSlot,
   type Settings,
-  writeSaveSlots,
 } from "./vnCore";
 import { queueImagePreload } from "./vnMedia";
 import { AssetsPanel, BgmPanel, DebugPanel, SavePanel, SettingsPanel } from "./vnPanels";
-import { useAudioRuntime, useBackgroundRuntime, usePresentationRuntime, useSceneRuntime } from "./vnRuntime";
+import {
+  useAudioRuntime,
+  useBackgroundRuntime,
+  usePresentationRuntime,
+  useSaveRuntime,
+  useSceneRuntime,
+  useWorkspaceRuntime,
+} from "./vnRuntime";
 import { CreditsScene, PlayingScene, TitleScene } from "./vnScenes";
 import {
   buildDebugMarkers,
@@ -53,7 +58,6 @@ import packageLockSource from "../package-lock.json?raw";
 import packageJsonSource from "../package.json?raw";
 import tsconfigSource from "../tsconfig.json?raw";
 import viteConfigSource from "../vite.config.ts?raw";
-const SAVE_SLOT_COUNT = 8;
 type GamePhase = "warning" | "title" | "playing" | "credits";
 type LogItem = { who: string; text: string };
 
@@ -96,15 +100,6 @@ const QA_ITEMS = [
   { q: "3、这个奇怪生物是什么（重要)？", a: "后续我当做不影响剧情和体验的吐槽旁白，要在剧情点击才会进行吐槽" },
   { q: "4、这个故事有原型吗？", a: "难说" },
 ];
-
-function safeParse<T>(raw: string | null, fallback: T): T {
-  if (!raw) return fallback;
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
-}
 
 const SCRIPT_SCENES = collectScriptScenes(SCRIPT.lines);
 
@@ -354,22 +349,11 @@ export function useVnRuntime() {
   const [settings, setSettings] = useState<Settings>(() => readJson(STORAGE_KEYS.settings, DEFAULT_SETTINGS));
   const [phase, setPhase] = useState<GamePhase>("warning");
   const [log, setLog] = useState<LogItem[]>([]);
-  const [ui, setUi] = useState({
-    showLog: false,
-    activePanel: null as string | null,
-    showQaPanel: false,
-    openQaIndex: null as number | null,
-    workspaceMode: "player" as "player" | "editor",
-  });
-  const showLog = ui.showLog;
-  const showQaPanel = ui.showQaPanel;
-  const openQaIndex = ui.openQaIndex;
   const [typing, setTyping] = useState(false);
   const [displayedText, setDisplayedText] = useState("");
   const [auto, setAuto] = useState(false);
   const [skip, setSkip] = useState(false);
   const [currentAct, setCurrentAct] = useState("");
-  const activePanel = ui.activePanel;
   const [codeTxtUrl, setCodeTxtUrl] = useState("");
   const [effectActive, setEffectActive] = useState("");
   const [showRain, setShowRain] = useState(false);
@@ -381,18 +365,34 @@ export function useVnRuntime() {
   const [textVisible, setTextVisible] = useState(true);
   const [lowPerfMode, setLowPerfMode] = useState(false);
   const [hudAwake, setHudAwake] = useState(false);
-  const [saveSlots, setSaveSlots] = useState<Array<SaveSlot | null>>(() => readSaveSlots(SAVE_SLOT_COUNT));
-  const [selectedSaveSlot, setSelectedSaveSlot] = useState(0);
-  const workspaceMode = ui.workspaceMode;
+  const {
+    showLog,
+    activePanel,
+    showQaPanel,
+    openQaIndex,
+    workspaceMode,
+    selectedSaveSlot,
+    assetQuery,
+    assetFilter,
+    resourcePage,
+    debugPage,
+    sceneQuery,
+    setShowLog,
+    setActivePanel,
+    setShowQaPanel,
+    setOpenQaIndex,
+    setWorkspaceMode,
+    setSelectedSaveSlot,
+    setAssetQuery,
+    setAssetFilter,
+    setResourcePage,
+    setDebugPage,
+    setSceneQuery,
+  } = useWorkspaceRuntime();
   const isEditorMode = workspaceMode === "editor";
-  const [assetQuery, setAssetQuery] = useState("");
-  const [assetFilter, setAssetFilter] = useState<keyof Manifest | "all">("all");
-  const [resourcePage, setResourcePage] = useState(0);
-  const [debugPage, setDebugPage] = useState(0);
   const [manifestState, setManifestState] = useState<Manifest>(() =>
     normalizeManifest(readJson<Manifest>(STORAGE_KEYS.manifest, {})),
   );
-  const [sceneQuery, setSceneQuery] = useState("");
   const particlesEnabled = settings.particlesEnabled && !lowPerfMode;
 
   const autoTimeoutRef = useRef<number | null>(null);
@@ -400,41 +400,6 @@ export function useVnRuntime() {
   const typingDelayRef = useRef<number | null>(null);
   const hudSleepRef = useRef<number | null>(null);
   const codeTxtUrlRef = useRef("");
-
-  const setShowLog = useCallback((value: boolean | ((prev: boolean) => boolean)) => {
-    setUi((prev) => ({
-      ...prev,
-      showLog: typeof value === "function" ? value(prev.showLog) : value,
-    }));
-  }, []);
-
-  const setActivePanel = useCallback((value: string | null | ((prev: string | null) => string | null)) => {
-    setUi((prev) => ({
-      ...prev,
-      activePanel: typeof value === "function" ? value(prev.activePanel) : value,
-    }));
-  }, []);
-
-  const setShowQaPanel = useCallback((value: boolean | ((prev: boolean) => boolean)) => {
-    setUi((prev) => ({
-      ...prev,
-      showQaPanel: typeof value === "function" ? value(prev.showQaPanel) : value,
-    }));
-  }, []);
-
-  const setOpenQaIndex = useCallback((value: number | null | ((prev: number | null) => number | null)) => {
-    setUi((prev) => ({
-      ...prev,
-      openQaIndex: typeof value === "function" ? value(prev.openQaIndex) : value,
-    }));
-  }, []);
-
-  const setWorkspaceMode = useCallback((value: "player" | "editor" | ((prev: "player" | "editor") => "player" | "editor")) => {
-    setUi((prev) => ({
-      ...prev,
-      workspaceMode: typeof value === "function" ? value(prev.workspaceMode) : value,
-    }));
-  }, []);
 
   const curLine = SCRIPT.lines[index];
   const {
@@ -451,8 +416,8 @@ export function useVnRuntime() {
     crossfadeBgm,
     playSfx,
     pulseUi,
-    setCurrentBgmId,
     setCurrentBgmName,
+    setCurrentBgmId,
   } = useAudioRuntime({ settings, bgmList });
   const {
     bgUrl,
@@ -512,6 +477,38 @@ export function useVnRuntime() {
     lowPerfMode,
     pulseUi,
     onAdvance: () => setIndex((value) => Math.min(SCRIPT.lines.length, value + 1)),
+  });
+  const buildSnapshot = useCallback(
+    () => buildSaveSnapshot(index, log, currentAct, currentBgmName, curLine, SCRIPT.lines.length),
+    [currentAct, currentBgmName, curLine, index, log],
+  );
+  const {
+    saveSlots,
+    hasContinueSave,
+    saveGame,
+    loadSaveSlot,
+    continueLastGame,
+    deleteSaveSlot,
+  } = useSaveRuntime({
+    buildSnapshot,
+    bgmList,
+    selectedSaveSlot,
+    onRestoreSession: ({ index: nextIndex, log: nextLog, act, bgmName }) => {
+      setPhase("playing");
+      setIndex(nextIndex);
+      setLog(nextLog);
+      setCurrentAct(act);
+      setActivePanel(null);
+      setShowLog(false);
+      setAuto(false);
+      setSkip(false);
+      setCurrentBgmId("");
+      setCurrentBgmName(bgmName);
+    },
+    onStopBgm: stopBgm,
+    onLoadBgmById: loadAndPlayBgm,
+    onResetPresentationState: resetPresentationState,
+    pulseUi,
   });
 
   useEffect(() => {
@@ -586,10 +583,6 @@ export function useVnRuntime() {
     setManifestState(updated);
     refreshBgmList();
   }, [manifestState, refreshBgmList]);
-
-  useEffect(() => {
-    setSaveSlots(readSaveSlots(SAVE_SLOT_COUNT));
-  }, []);
 
   useEffect(() => {
     if (!isEditorMode && (activePanel === "assets" || activePanel === "debug")) {
@@ -706,95 +699,6 @@ export function useVnRuntime() {
       if (typingFrameRef.current) cancelAnimationFrame(typingFrameRef.current);
     };
   }, [curLine, phase, settings.typeMs, skip]);
-
-  const commitSaveSlot = useCallback(
-    (slotIndex: number) => {
-      const data = {
-        ...buildSaveSnapshot(index, log, currentAct, currentBgmName, curLine, SCRIPT.lines.length),
-        slot: slotIndex,
-      };
-      const nextSlots = readSaveSlots(SAVE_SLOT_COUNT);
-      nextSlots[slotIndex] = data;
-      writeSaveSlots(nextSlots, SAVE_SLOT_COUNT);
-      setSaveSlots(nextSlots);
-      localStorage.setItem(STORAGE_KEYS.save, JSON.stringify(data));
-      return data;
-    },
-    [currentAct, currentBgmName, curLine, index, log],
-  );
-
-  const saveGame = useCallback(
-    (slotIndex = selectedSaveSlot, persistSlot = true) => {
-      if (persistSlot) {
-        commitSaveSlot(slotIndex);
-      } else {
-        const data = buildSaveSnapshot(index, log, currentAct, currentBgmName, curLine, SCRIPT.lines.length);
-        localStorage.setItem(STORAGE_KEYS.save, JSON.stringify(data));
-      }
-      pulseUi("ui");
-    },
-    [commitSaveSlot, currentAct, currentBgmName, curLine, index, log, pulseUi, selectedSaveSlot],
-  );
-
-  const loadSaveSlot = useCallback(
-    (slotIndex: number) => {
-      const slot = saveSlots[slotIndex];
-      if (!slot) return;
-      setPhase("playing");
-      setIndex(Math.min(SCRIPT.lines.length - 1, slot.index));
-      setLog(slot.log || []);
-      setCurrentAct(slot.act || "");
-      setActivePanel(null);
-      setShowLog(false);
-      setAuto(false);
-      setSkip(false);
-      resetPresentationState();
-      stopBgm();
-      const match = bgmList.find((item) => item.label === slot.bgmName || item.label.includes(slot.bgmName || ""));
-      if (match) {
-        void loadAndPlayBgm(match.id);
-      } else {
-        setCurrentBgmId("");
-        setCurrentBgmName(slot.bgmName || "");
-      }
-      pulseUi("scene");
-    },
-    [bgmList, loadAndPlayBgm, pulseUi, saveSlots, stopBgm],
-  );
-
-  const continueLastGame = useCallback(() => {
-    const lastSave = safeParse<SaveSlot | null>(localStorage.getItem(STORAGE_KEYS.save), null);
-    if (!lastSave) return;
-    setPhase("playing");
-    setIndex(Math.min(SCRIPT.lines.length - 1, lastSave.index));
-    setLog(lastSave.log || []);
-    setCurrentAct(lastSave.act || "");
-    setActivePanel(null);
-    setShowLog(false);
-    setAuto(false);
-    setSkip(false);
-    resetPresentationState();
-    stopBgm();
-    const match = bgmList.find((item) => item.label === lastSave.bgmName || item.label.includes(lastSave.bgmName || ""));
-    if (match) {
-      void loadAndPlayBgm(match.id);
-    } else {
-      setCurrentBgmId("");
-      setCurrentBgmName(lastSave.bgmName || "");
-    }
-    pulseUi("scene");
-  }, [bgmList, loadAndPlayBgm, pulseUi, stopBgm]);
-
-  const deleteSaveSlot = useCallback(
-    (slotIndex: number) => {
-      const nextSlots = readSaveSlots(SAVE_SLOT_COUNT);
-      nextSlots[slotIndex] = null;
-      writeSaveSlots(nextSlots, SAVE_SLOT_COUNT);
-      setSaveSlots(nextSlots);
-      pulseUi("ui");
-    },
-    [pulseUi],
-  );
 
   const handleNext = useCallback(() => {
     if (phase !== "playing" || !curLine) return;
@@ -1091,7 +995,6 @@ export function useVnRuntime() {
     () => phase === "title" && (activePanel === "settings" || (isEditorMode && activePanel === "assets")),
     [activePanel, isEditorMode, phase],
   );
-  const hasContinueSave = Boolean(localStorage.getItem(STORAGE_KEYS.save));
   const resourceEntries = useMemo(
     () => buildResourceEntries(manifestState),
     [manifestState],

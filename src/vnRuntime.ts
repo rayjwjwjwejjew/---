@@ -5,10 +5,14 @@ import type { StageCharacter } from "./engine";
 import { ensureImageReady, queueImagePreload } from "./vnMedia";
 import { findBestAssetMatch, getBgmMoodClass, getCurrentBgmLabel } from "./vnDerived";
 import {
+  STORAGE_KEYS,
+  readSaveSlots,
   readSceneBgOverrides,
+  type SaveSlot,
   type Manifest,
   type SceneBgOverride,
   type Settings,
+  writeSaveSlots,
   writeSceneBgOverrides,
 } from "./vnCore";
 
@@ -20,6 +24,282 @@ type UseAudioRuntimeArgs = {
 };
 
 type ScriptLine = (typeof SCRIPT.lines)[number];
+
+const SAVE_SLOT_COUNT = 8;
+
+type WorkspaceMode = "player" | "editor";
+
+type UseWorkspaceRuntimeArgs = {
+  initialAssetFilter?: keyof Manifest | "all";
+  initialAssetQuery?: string;
+  initialDebugPage?: number;
+  initialOpenQaIndex?: number | null;
+  initialResourcePage?: number;
+  initialSceneQuery?: string;
+  initialSelectedSaveSlot?: number;
+  initialShowLog?: boolean;
+  initialShowQaPanel?: boolean;
+  initialWorkspaceMode?: WorkspaceMode;
+  initialActivePanel?: string | null;
+};
+
+type UseSaveRuntimeArgs = {
+  buildSnapshot: () => SaveSlot;
+  bgmList: AudioItem[];
+  selectedSaveSlot: number;
+  onRestoreSession: (session: { index: number; log: { who: string; text: string }[]; act: string; bgmName: string }) => void;
+  onStopBgm: () => void;
+  onLoadBgmById: (assetId: string) => Promise<void>;
+  onResetPresentationState: () => void;
+  pulseUi: (_layer?: string) => void;
+};
+
+function safeParseJson<T>(raw: string | null, fallback: T): T {
+  if (!raw) return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+export function useWorkspaceRuntime({
+  initialAssetFilter = "all",
+  initialAssetQuery = "",
+  initialDebugPage = 0,
+  initialOpenQaIndex = null,
+  initialResourcePage = 0,
+  initialSceneQuery = "",
+  initialSelectedSaveSlot = 0,
+  initialShowLog = false,
+  initialShowQaPanel = false,
+  initialWorkspaceMode = "player",
+  initialActivePanel = null,
+}: UseWorkspaceRuntimeArgs = {}) {
+  const [workspace, setWorkspace] = useState({
+    showLog: initialShowLog,
+    activePanel: initialActivePanel as string | null,
+    showQaPanel: initialShowQaPanel,
+    openQaIndex: initialOpenQaIndex as number | null,
+    workspaceMode: initialWorkspaceMode as WorkspaceMode,
+    selectedSaveSlot: initialSelectedSaveSlot,
+    assetQuery: initialAssetQuery,
+    assetFilter: initialAssetFilter as keyof Manifest | "all",
+    resourcePage: initialResourcePage,
+    debugPage: initialDebugPage,
+    sceneQuery: initialSceneQuery,
+  });
+
+  const setShowLog = useCallback((value: boolean | ((prev: boolean) => boolean)) => {
+    setWorkspace((prev) => ({
+      ...prev,
+      showLog: typeof value === "function" ? value(prev.showLog) : value,
+    }));
+  }, []);
+
+  const setActivePanel = useCallback((value: string | null | ((prev: string | null) => string | null)) => {
+    setWorkspace((prev) => ({
+      ...prev,
+      activePanel: typeof value === "function" ? value(prev.activePanel) : value,
+    }));
+  }, []);
+
+  const setShowQaPanel = useCallback((value: boolean | ((prev: boolean) => boolean)) => {
+    setWorkspace((prev) => ({
+      ...prev,
+      showQaPanel: typeof value === "function" ? value(prev.showQaPanel) : value,
+    }));
+  }, []);
+
+  const setOpenQaIndex = useCallback((value: number | null | ((prev: number | null) => number | null)) => {
+    setWorkspace((prev) => ({
+      ...prev,
+      openQaIndex: typeof value === "function" ? value(prev.openQaIndex) : value,
+    }));
+  }, []);
+
+  const setWorkspaceMode = useCallback((value: WorkspaceMode | ((prev: WorkspaceMode) => WorkspaceMode)) => {
+    setWorkspace((prev) => ({
+      ...prev,
+      workspaceMode: typeof value === "function" ? value(prev.workspaceMode) : value,
+    }));
+  }, []);
+
+  const setSelectedSaveSlot = useCallback((value: number | ((prev: number) => number)) => {
+    setWorkspace((prev) => ({
+      ...prev,
+      selectedSaveSlot: typeof value === "function" ? value(prev.selectedSaveSlot) : value,
+    }));
+  }, []);
+
+  const setAssetQuery = useCallback((value: string | ((prev: string) => string)) => {
+    setWorkspace((prev) => ({
+      ...prev,
+      assetQuery: typeof value === "function" ? value(prev.assetQuery) : value,
+    }));
+  }, []);
+
+  const setAssetFilter = useCallback((value: keyof Manifest | "all" | ((prev: keyof Manifest | "all") => keyof Manifest | "all")) => {
+    setWorkspace((prev) => ({
+      ...prev,
+      assetFilter: typeof value === "function" ? value(prev.assetFilter) : value,
+    }));
+  }, []);
+
+  const setResourcePage = useCallback((value: number | ((prev: number) => number)) => {
+    setWorkspace((prev) => ({
+      ...prev,
+      resourcePage: typeof value === "function" ? value(prev.resourcePage) : value,
+    }));
+  }, []);
+
+  const setDebugPage = useCallback((value: number | ((prev: number) => number)) => {
+    setWorkspace((prev) => ({
+      ...prev,
+      debugPage: typeof value === "function" ? value(prev.debugPage) : value,
+    }));
+  }, []);
+
+  const setSceneQuery = useCallback((value: string | ((prev: string) => string)) => {
+    setWorkspace((prev) => ({
+      ...prev,
+      sceneQuery: typeof value === "function" ? value(prev.sceneQuery) : value,
+    }));
+  }, []);
+
+  return {
+    workspace,
+    showLog: workspace.showLog,
+    activePanel: workspace.activePanel,
+    showQaPanel: workspace.showQaPanel,
+    openQaIndex: workspace.openQaIndex,
+    workspaceMode: workspace.workspaceMode,
+    selectedSaveSlot: workspace.selectedSaveSlot,
+    assetQuery: workspace.assetQuery,
+    assetFilter: workspace.assetFilter,
+    resourcePage: workspace.resourcePage,
+    debugPage: workspace.debugPage,
+    sceneQuery: workspace.sceneQuery,
+    setShowLog,
+    setActivePanel,
+    setShowQaPanel,
+    setOpenQaIndex,
+    setWorkspaceMode,
+    setSelectedSaveSlot,
+    setAssetQuery,
+    setAssetFilter,
+    setResourcePage,
+    setDebugPage,
+    setSceneQuery,
+  };
+}
+
+export function useSaveRuntime({
+  buildSnapshot,
+  bgmList,
+  selectedSaveSlot,
+  onRestoreSession,
+  onStopBgm,
+  onLoadBgmById,
+  onResetPresentationState,
+  pulseUi,
+}: UseSaveRuntimeArgs) {
+  const [saveSlots, setSaveSlots] = useState<Array<SaveSlot | null>>(() => readSaveSlots(SAVE_SLOT_COUNT));
+  const [hasContinueSave, setHasContinueSave] = useState(() => Boolean(safeParseJson<SaveSlot | null>(localStorage.getItem(STORAGE_KEYS.save), null)));
+
+  const commitSaveSlot = useCallback(
+    (slotIndex: number) => {
+      const data = {
+        ...buildSnapshot(),
+        slot: slotIndex,
+      };
+      const nextSlots = readSaveSlots(SAVE_SLOT_COUNT);
+      nextSlots[slotIndex] = data;
+      writeSaveSlots(nextSlots, SAVE_SLOT_COUNT);
+      setSaveSlots(nextSlots);
+      localStorage.setItem(STORAGE_KEYS.save, JSON.stringify(data));
+      setHasContinueSave(true);
+      return data;
+    },
+    [buildSnapshot],
+  );
+
+  const saveGame = useCallback(
+    (slotIndex = selectedSaveSlot, persistSlot = true) => {
+      if (persistSlot) {
+        commitSaveSlot(slotIndex);
+      } else {
+        const data = buildSnapshot();
+        localStorage.setItem(STORAGE_KEYS.save, JSON.stringify(data));
+        setHasContinueSave(true);
+      }
+      pulseUi("ui");
+    },
+    [buildSnapshot, commitSaveSlot, pulseUi, selectedSaveSlot],
+  );
+
+  const restoreSave = useCallback(
+    async (slot: SaveSlot) => {
+      onRestoreSession({
+        index: Math.min(SCRIPT.lines.length - 1, slot.index),
+        log: slot.log || [],
+        act: slot.act || "",
+        bgmName: slot.bgmName || "",
+      });
+      onResetPresentationState();
+      onStopBgm();
+      const match = bgmList.find((item) => item.label === slot.bgmName || item.label.includes(slot.bgmName || ""));
+      if (match) {
+        await onLoadBgmById(match.id);
+      }
+      pulseUi("scene");
+    },
+    [bgmList, onLoadBgmById, onResetPresentationState, onRestoreSession, onStopBgm, pulseUi],
+  );
+
+  const loadSaveSlot = useCallback(
+    (slotIndex: number) => {
+      const slot = saveSlots[slotIndex];
+      if (!slot) return;
+      void restoreSave(slot);
+    },
+    [restoreSave, saveSlots],
+  );
+
+  const continueLastGame = useCallback(() => {
+    const lastSave = safeParseJson<SaveSlot | null>(localStorage.getItem(STORAGE_KEYS.save), null);
+    if (!lastSave) return;
+    void restoreSave(lastSave);
+  }, [restoreSave]);
+
+  const deleteSaveSlot = useCallback(
+    (slotIndex: number) => {
+      const nextSlots = readSaveSlots(SAVE_SLOT_COUNT);
+      nextSlots[slotIndex] = null;
+      writeSaveSlots(nextSlots, SAVE_SLOT_COUNT);
+      setSaveSlots(nextSlots);
+      pulseUi("ui");
+    },
+    [pulseUi],
+  );
+
+  useEffect(() => {
+    const onStorage = () => {
+      setHasContinueSave(Boolean(safeParseJson<SaveSlot | null>(localStorage.getItem(STORAGE_KEYS.save), null)));
+    };
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
+
+  return {
+    saveSlots,
+    hasContinueSave,
+    saveGame,
+    loadSaveSlot,
+    continueLastGame,
+    deleteSaveSlot,
+  };
+}
 
 type UseSceneRuntimeArgs = {
   index: number;
