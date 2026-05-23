@@ -30,7 +30,18 @@ import {
   useSceneRuntime,
   useWorkspaceRuntime,
 } from "./vnRuntime";
-import { CreditsRollView, CreditsScene, PlayingScene, TitleQaPanel, TitleScene, TitleSystemPanel } from "./vnScenes";
+import {
+  BacklogView,
+  CreditsRollView,
+  CreditsScene,
+  DialogueHudView,
+  PlaybackControlBar,
+  PlayingScene,
+  PresentationOverlays,
+  TitleQaPanel,
+  TitleScene,
+  TitleSystemPanel,
+} from "./vnScenes";
 import {
   buildDebugMarkers,
   collectScriptScenes,
@@ -1106,54 +1117,36 @@ export function useVnRuntime() {
             </div>
           )}
 
-          <div id="panelBar" className={`${hudAwake || activePanel || showLog ? "awake" : ""} ${activePanel ? "panel-open" : ""}`.trim()}>
-            <button className="pbtn" onClick={handlePrev}>
-              ◀
-            </button>
-            <button className="pbtn" onClick={handleNext}>
-              ▶
-            </button>
-            <button className="pbtn" aria-pressed={auto} onClick={() => { setAuto(!auto); setSkip(false); }}>
-              自动
-            </button>
-            <button className="pbtn" aria-pressed={skip} onClick={() => { setSkip(!skip); setAuto(false); }}>
-              跳过
-            </button>
-            <button className="pbtn" onClick={() => setShowLog(true)}>
-              历史
-            </button>
-            <button className="pbtn" onClick={() => togglePanel("assets")}>
-              资源
-            </button>
-            <button className="pbtn" onClick={() => togglePanel("settings")}>
-              设置
-            </button>
-            <button className="pbtn" aria-pressed={activePanel === "bgm"} onClick={() => togglePanel("bgm")}>
-              {bgmPlaying && !bgmMuted ? "♫" : "BGM"}
-            </button>
-            <button className="pbtn" onClick={() => togglePanel("save")}>
-              存档槽
-            </button>
-            {isEditorMode && (
-              <button className="pbtn" onClick={() => togglePanel("debug")}>
-                调试
-              </button>
-            )}
-            <button className="pbtn" onClick={() => setWorkspaceMode((value) => (value === "editor" ? "player" : "editor"))}>
-              {isEditorMode ? "玩家模式" : "编辑器"}
-            </button>
-            <button className="pbtn" onClick={() => { setPhase("title"); setAuto(false); setSkip(false); }}>
-              标题
-            </button>
-            <button className="pbtn" onClick={handleExportAllCodeTxt}>
-              代码
-            </button>
-            {codeTxtUrl && (
-              <a className="pbtn" href={codeTxtUrl} download="VN_全部代码.txt" style={{ textDecoration: "none" }}>
-                ⬇TXT
-              </a>
-            )}
-          </div>
+          <PlaybackControlBar
+            hudAwake={hudAwake}
+            activePanel={activePanel}
+            showLog={showLog}
+            auto={auto}
+            skip={skip}
+            bgmPlaying={bgmPlaying}
+            bgmMuted={bgmMuted}
+            isEditorMode={isEditorMode}
+            codeTxtUrl={codeTxtUrl}
+            onPrev={handlePrev}
+            onNext={handleNext}
+            onToggleAuto={() => {
+              setAuto(!auto);
+              setSkip(false);
+            }}
+            onToggleSkip={() => {
+              setSkip(!skip);
+              setAuto(false);
+            }}
+            onOpenLog={() => setShowLog(true)}
+            onTogglePanel={togglePanel}
+            onToggleWorkspaceMode={() => setWorkspaceMode((value) => (value === "editor" ? "player" : "editor"))}
+            onReturnTitle={() => {
+              setPhase("title");
+              setAuto(false);
+              setSkip(false);
+            }}
+            onExportCode={handleExportAllCodeTxt}
+          />
 
           {isEditorMode && activePanel === "assets" && (
             <div className="panel show">
@@ -1313,88 +1306,35 @@ export function useVnRuntime() {
           </div>
           )}
 
-          <div id="hud" style={{ display: curLine ? "block" : "none" }}>
-            <div
-              id="box"
-              className={`${!typing && curLine?.kind !== "choice" ? "can-advance" : ""} ${curLine?.kind === "choice" ? "choice-mode" : ""} tone-${dialogueTone} ${emphasisLine ? "emphasis-line" : ""}`.trim()}
-              onClick={() => { if (!curLine?.options) handleNext(); }}
-            >
-              <div id="name" style={{ display: showName ? "flex" : "none" }}>
-                <span className="name-line-left" style={{ background: `linear-gradient(to right, transparent 0%, ${speakerColor} 100%)` }} />
-                <span className="name-text-inner" style={{ color: speakerColor, borderColor: speakerColor.replace("0.95", "0.32") }}>
-                  <span>{speaker}</span>
-                </span>
-                <span className="name-line-right" style={{ background: `linear-gradient(to left, transparent 0%, ${speakerColor} 100%)` }} />
-              </div>
+          <DialogueHudView
+            visible={Boolean(curLine)}
+            canAdvance={!typing && curLine?.kind !== "choice"}
+            isChoiceMode={curLine?.kind === "choice"}
+            dialogueTone={dialogueTone}
+            emphasisLine={emphasisLine}
+            showName={showName}
+            speaker={speaker}
+            speakerColor={speakerColor}
+            textVisible={textVisible}
+            displayedText={curLine?.kind === "choice" ? "请选择：" : displayedText}
+            sceneProgress={sceneProgress}
+            options={curLine?.options}
+            getChoiceTone={getChoiceTone}
+            getChoiceToneLabel={getChoiceToneLabel}
+            onNext={handleNext}
+            onChoice={handleChoice}
+          />
 
-              <div id="text" className={`${textVisible ? "show" : "text-exit"} tone-${dialogueTone} ${emphasisLine ? "emphasis-line" : ""}`.trim()}>
-                {curLine?.kind === "choice" ? "请选择：" : displayedText}
-              </div>
-
-              <div id="choices" className={curLine?.kind === "choice" ? "show" : ""}>
-                {curLine?.kind === "choice" && <div className="choices-kicker">命运分歧</div>}
-                {curLine?.kind === "choice" &&
-                  curLine.options?.map((opt, idx) => {
-                    const choiceTone = getChoiceTone(opt.text);
-                    return (
-                      <button
-                        key={`${opt.text}_${idx}`}
-                        className={`choice choice-${choiceTone}`}
-                        onClick={(e) => { e.stopPropagation(); handleChoice(opt.cmd); }}
-                      >
-                        <span className="choice-tone-label">{getChoiceToneLabel(choiceTone)}</span>
-                        <span>{opt.text}</span>
-                      </button>
-                    );
-                  })}
-              </div>
-
-              <div id="subline">
-                <div className="right">
-                  <span className="story-meta-value">{sceneProgress}</span>
-                </div>
-              </div>
-            </div>
-          </div>
-
-          <div id="backlog" className={showLog ? "show" : ""}>
-            <div className="wrap">
-              <div className="top">
-                <div className="t">历史记录</div>
-                <button className="btn" onClick={() => setShowLog(false)}>
-                  关闭
-                </button>
-              </div>
-              <div className="list">
-                {log
-                  .slice()
-                  .reverse()
-                  .map((item, idx) => (
-                    <div key={`${item.who}_${idx}`} className="logItem">
-                      <div className="who">{item.who}</div>
-                      <div className="say">{item.text}</div>
-                    </div>
-                  ))}
-              </div>
-            </div>
-          </div>
+          <BacklogView visible={showLog} log={log} onClose={() => setShowLog(false)} />
         </PlayingScene>
       )}
 
-      <div className={`screen-flash ${screenFlashVisible ? "show start-flash" : ""}`}>
-        <div className="screen-flash-title">盛开在谎言之上</div>
-      </div>
-
-      {openingPreludeVisible && phase === "playing" && (
-        <div className="opening-prelude">
-          <div className="opening-prelude-backdrop" />
-          <div className="opening-prelude-inner">
-            <div className="opening-prelude-kicker">OPENING</div>
-            <div className="opening-prelude-title">{openingPreludeText}</div>
-            <div className="opening-prelude-copy">黑场、字幕、环境音和轻微推进，正在把这一幕正式拉开。</div>
-          </div>
-        </div>
-      )}
+      <PresentationOverlays
+        screenFlashVisible={screenFlashVisible}
+        openingPreludeVisible={openingPreludeVisible}
+        openingPreludeText={openingPreludeText}
+        playingPhase={phase === "playing"}
+      />
     </div>
   );
 }
