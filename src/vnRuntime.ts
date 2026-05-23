@@ -6,6 +6,8 @@ import { ensureImageReady, queueImagePreload } from "./vnMedia";
 import { findBestAssetMatch, getBgmMoodClass, getCurrentBgmLabel } from "./vnDerived";
 import {
   STORAGE_KEYS,
+  normalizeManifest,
+  readJson,
   readSaveSlots,
   readSceneBgOverrides,
   type SaveSlot,
@@ -75,6 +77,21 @@ type UsePlaybackRuntimeArgs = {
   onCloseOverlays: () => void;
 };
 
+type ExportSourceFile = {
+  path: string;
+  content: string;
+  language: string;
+};
+
+type UseCodeExportRuntimeArgs = {
+  files: ExportSourceFile[];
+};
+
+type UseLibraryRuntimeArgs = {
+  initialManifest: Manifest;
+  onManifestChange?: (manifest: Manifest) => void;
+};
+
 function safeParseJson<T>(raw: string | null, fallback: T): T {
   if (!raw) return fallback;
   try {
@@ -111,6 +128,140 @@ function getLineTypingDelay(text: string, index: number, baseMs: number) {
     if (EMOTION_WORDS.some((word) => windowText.includes(word))) delay *= 1.35;
   }
   return Math.max(12, Math.round(delay));
+}
+
+export function useCodeExportRuntime({ files }: UseCodeExportRuntimeArgs) {
+  const [codeTxtUrl, setCodeTxtUrl] = useState("");
+  const codeTxtUrlRef = useRef("");
+
+  const exportAllCodeTxt = useCallback(() => {
+    const header = [
+      "VN Studio - 完整源码导出",
+      `导出时间: ${new Date().toLocaleString()}`,
+      `文件数: ${files.length}`,
+      "",
+      "说明：以下内容按原始文件路径逐个导出，每个文件使用独立代码块包裹，便于校验与还原。",
+      "",
+      "========================================",
+      "",
+    ].join("\n");
+
+    const body = files
+      .map((file) =>
+        [
+          `FILE: ${file.path}`,
+          `LANG: ${file.language}`,
+          "----------------------------------------",
+          `\`\`\`${file.language}`,
+          file.content.replace(/\s+$/u, ""),
+          "```",
+          "",
+          "========================================",
+          "",
+        ].join("\n"),
+      )
+      .join("");
+
+    const blob = new Blob([header + body], { type: "text/plain;charset=utf-8" });
+    if (codeTxtUrlRef.current) URL.revokeObjectURL(codeTxtUrlRef.current);
+    const url = URL.createObjectURL(blob);
+    codeTxtUrlRef.current = url;
+    setCodeTxtUrl(url);
+
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "VN_全部代码.txt";
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+  }, [files]);
+
+  useEffect(() => {
+    return () => {
+      if (codeTxtUrlRef.current) URL.revokeObjectURL(codeTxtUrlRef.current);
+    };
+  }, []);
+
+  return {
+    codeTxtUrl,
+    exportAllCodeTxt,
+  };
+}
+
+export function useLibraryRuntime({ initialManifest, onManifestChange }: UseLibraryRuntimeArgs) {
+  const [manifestState, setManifestState] = useState<Manifest>(() => normalizeManifest(initialManifest));
+  const [bgmList, setBgmList] = useState<{ id: string; label: string }[]>(() => normalizeManifest(initialManifest).bgm || []);
+  const [sfxList, setSfxList] = useState<{ id: string; label: string }[]>(() => normalizeManifest(initialManifest).sfx || []);
+
+  const refreshLibrary = useCallback(() => {
+    try {
+      const manifest = normalizeManifest(readJson<Manifest>(STORAGE_KEYS.manifest, {}));
+      setManifestState(manifest);
+      setBgmList(manifest.bgm || []);
+      setSfxList(manifest.sfx || []);
+      onManifestChange?.(manifest);
+    } catch {
+      setManifestState({});
+      setBgmList([]);
+      setSfxList([]);
+      onManifestChange?.({});
+    }
+  }, [onManifestChange]);
+
+  useEffect(() => {
+    refreshLibrary();
+  }, [refreshLibrary]);
+
+  const uploadAsset = useCallback(
+    async (kind: "bg" | "sprite" | "video" | "bgm" | "sfx") => {
+      const input = document.createElement("input");
+      input.type = "file";
+      input.accept = kind === "bgm" || kind === "sfx" ? "audio/*" : kind === "video" ? "video/*" : "image/*";
+      input.onchange = async () => {
+        const file = input.files?.[0];
+        if (!file) return;
+        const label = prompt("资源名称", file.name) || file.name;
+        const id = `${kind}_${crypto.randomUUID()}`;
+        await AssetDB.put(AssetDB.STORE_ASSETS, id, file);
+        try {
+          const manifest = normalizeManifest(readJson<Manifest>(STORAGE_KEYS.manifest, {}));
+          const key = kind === "bg" ? "backgrounds" : kind;
+          manifest[key] = [{ id, label }, ...((manifest[key] || []) as { id: string; label: string }[])];
+          localStorage.setItem(STORAGE_KEYS.manifest, JSON.stringify(manifest));
+          refreshLibrary();
+        } catch {
+          // ignore
+        }
+        alert("上传成功");
+      };
+      input.click();
+    },
+    [refreshLibrary],
+  );
+
+  const batchRenameResources = useCallback(() => {
+    const next = prompt("批量重命名：输入前缀");
+    if (!next) return;
+    const updated: Manifest = { ...manifestState };
+    (["backgrounds", "sprite", "video", "bgm", "sfx"] as const).forEach((kind) => {
+      updated[kind] = (updated[kind] || []).map((item, idx) => ({ ...item, label: `${next}-${idx + 1}` }));
+    });
+    localStorage.setItem(STORAGE_KEYS.manifest, JSON.stringify(updated));
+    setManifestState(updated);
+    setBgmList(updated.bgm || []);
+    setSfxList(updated.sfx || []);
+    onManifestChange?.(updated);
+  }, [manifestState, onManifestChange]);
+
+  return {
+    manifestState,
+    setManifestState,
+    bgmList,
+    sfxList,
+    refreshLibrary,
+    uploadAsset,
+    batchRenameResources,
+  };
 }
 
 export function useWorkspaceRuntime({

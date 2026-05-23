@@ -6,13 +6,10 @@ import {
   DEFAULT_BG,
 } from "./engine";
 import type { StageCharacter } from "./engine";
-import { AssetDB } from "./db";
 import {
-  type AssetEntry,
   DEFAULT_SETTINGS,
   buildSaveSnapshot,
   getSavedAtLabel,
-  normalizeManifest,
   readJson,
   STORAGE_KEYS,
   type Manifest,
@@ -24,6 +21,8 @@ import { AssetsPanel, SettingsPanel } from "./vnPanels";
 import {
   useAudioRuntime,
   useBackgroundRuntime,
+  useCodeExportRuntime,
+  useLibraryRuntime,
   usePlaybackRuntime,
   usePresentationRuntime,
   useSaveRuntime,
@@ -326,13 +325,10 @@ export function useVnRuntime() {
   const [phase, setPhase] = useState<GamePhase>("warning");
   const [log, setLog] = useState<LogItem[]>([]);
   const [currentAct, setCurrentAct] = useState("");
-  const [codeTxtUrl, setCodeTxtUrl] = useState("");
   const [effectActive, setEffectActive] = useState("");
   const [showRain, setShowRain] = useState(false);
   const [sceneBlur, setSceneBlur] = useState(false);
   const [debugExpressionOverride, setDebugExpressionOverride] = useState<"calm" | "panic" | null>(null);
-  const [bgmList, setBgmList] = useState<{ id: string; label: string }[]>([]);
-  const [sfxList, setSfxList] = useState<{ id: string; label: string }[]>([]);
   const [titleReady, setTitleReady] = useState(false);
   const [lowPerfMode, setLowPerfMode] = useState(false);
   const {
@@ -360,12 +356,16 @@ export function useVnRuntime() {
     setSceneQuery,
   } = useWorkspaceRuntime();
   const isEditorMode = workspaceMode === "editor";
-  const [manifestState, setManifestState] = useState<Manifest>(() =>
-    normalizeManifest(readJson<Manifest>(STORAGE_KEYS.manifest, {})),
-  );
+  const {
+    manifestState,
+    bgmList,
+    sfxList,
+    uploadAsset,
+    batchRenameResources,
+  } = useLibraryRuntime({
+    initialManifest: readJson<Manifest>(STORAGE_KEYS.manifest, {}),
+  });
   const particlesEnabled = settings.particlesEnabled && !lowPerfMode;
-
-  const codeTxtUrlRef = useRef("");
 
   const curLine = SCRIPT.lines[index];
   const {
@@ -512,6 +512,28 @@ export function useVnRuntime() {
       setShowLog(false);
     },
   });
+  const exportFiles = useMemo(
+    () =>
+      [
+        { path: ".gitignore", content: gitignoreSource },
+        { path: ".github/workflows/deploy-pages.yml", content: workflowSource },
+        { path: "index.html", content: indexHtmlSource },
+        { path: "package-lock.json", content: packageLockSource },
+        { path: "package.json", content: packageJsonSource },
+        { path: "tsconfig.json", content: tsconfigSource },
+        { path: "vite.config.ts", content: viteConfigSource },
+        { path: "src/main.tsx", content: mainSource },
+        { path: "src/App.tsx", content: appSource },
+        { path: "src/engine.ts", content: engineSource },
+        { path: "src/script.ts", content: scriptSource },
+        { path: "src/db.ts", content: dbSource },
+        { path: "src/index.css", content: cssSource },
+        { path: "src/vite-env.d.ts", content: viteEnvSource },
+        { path: "src/utils/cn.ts", content: cnSource },
+      ].map((file) => ({ ...file, language: getCodeFenceLanguage(file.path) })),
+    [],
+  );
+  const { codeTxtUrl, exportAllCodeTxt } = useCodeExportRuntime({ files: exportFiles });
 
   useEffect(() => {
     const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -556,35 +578,6 @@ export function useVnRuntime() {
     root.setProperty("--title-bg-url", `url("${TITLE_SCREEN_BG}")`);
     localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify(settings));
   }, [settings]);
-
-  const refreshBgmList = useCallback(() => {
-    try {
-      const manifest = normalizeManifest(readJson<Manifest>(STORAGE_KEYS.manifest, {}));
-      setManifestState(manifest);
-      setBgmList(manifest.bgm || []);
-      setSfxList(manifest.sfx || []);
-    } catch {
-      setManifestState({});
-      setBgmList([]);
-      setSfxList([]);
-    }
-  }, []);
-
-  useEffect(() => {
-    refreshBgmList();
-  }, [refreshBgmList]);
-
-  const batchRenameResources = useCallback(() => {
-    const next = prompt("批量重命名：输入前缀");
-    if (!next) return;
-    const updated: Manifest = { ...manifestState };
-    (["backgrounds", "sprite", "video", "bgm", "sfx"] as const).forEach((kind) => {
-      updated[kind] = (updated[kind] || []).map((item, idx) => ({ ...item, label: `${next}-${idx + 1}` }));
-    });
-    localStorage.setItem(STORAGE_KEYS.manifest, JSON.stringify(updated));
-    setManifestState(updated);
-    refreshBgmList();
-  }, [manifestState, refreshBgmList]);
 
   useEffect(() => {
     if (!isEditorMode && (activePanel === "assets" || activePanel === "debug")) {
@@ -668,30 +661,6 @@ export function useVnRuntime() {
     setActivePanel((prev) => (prev === name ? null : name));
   };
 
-  const uploadAsset = async (kind: "bg" | "sprite" | "video" | "bgm" | "sfx") => {
-    const input = document.createElement("input");
-    input.type = "file";
-    input.accept = kind === "bgm" || kind === "sfx" ? "audio/*" : kind === "video" ? "video/*" : "image/*";
-    input.onchange = async () => {
-      const file = input.files?.[0];
-      if (!file) return;
-      const label = prompt("资源名称", file.name) || file.name;
-      const id = `${kind}_${crypto.randomUUID()}`;
-      await AssetDB.put(AssetDB.STORE_ASSETS, id, file);
-      try {
-        const manifest = normalizeManifest(readJson<Manifest>(STORAGE_KEYS.manifest, {}));
-        const key = kind === "bg" ? "backgrounds" : kind;
-        manifest[key] = [{ id, label }, ...((manifest[key] || []) as AssetEntry[])];
-        localStorage.setItem(STORAGE_KEYS.manifest, JSON.stringify(manifest));
-        refreshBgmList();
-      } catch {
-        // ignore
-      }
-      alert("上传成功");
-    };
-    input.click();
-  };
-
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
       if (phase === "warning") return;
@@ -714,72 +683,6 @@ export function useVnRuntime() {
       window.removeEventListener("keydown", handler);
     };
   }, [activePanel, phase, showQaPanel]);
-
-  const handleExportAllCodeTxt = () => {
-    const files = [
-      { path: ".gitignore", content: gitignoreSource },
-      { path: ".github/workflows/deploy-pages.yml", content: workflowSource },
-      { path: "index.html", content: indexHtmlSource },
-      { path: "package-lock.json", content: packageLockSource },
-      { path: "package.json", content: packageJsonSource },
-      { path: "tsconfig.json", content: tsconfigSource },
-      { path: "vite.config.ts", content: viteConfigSource },
-      { path: "src/main.tsx", content: mainSource },
-      { path: "src/App.tsx", content: appSource },
-      { path: "src/engine.ts", content: engineSource },
-      { path: "src/script.ts", content: scriptSource },
-      { path: "src/db.ts", content: dbSource },
-      { path: "src/index.css", content: cssSource },
-      { path: "src/vite-env.d.ts", content: viteEnvSource },
-      { path: "src/utils/cn.ts", content: cnSource },
-    ].map((file) => ({ ...file, language: getCodeFenceLanguage(file.path) }));
-
-    const header = [
-      "VN Studio - 完整源码导出",
-      `导出时间: ${new Date().toLocaleString()}`,
-      `文件数: ${files.length}`,
-      "",
-      "说明：以下内容按原始文件路径逐个导出，每个文件使用独立代码块包裹，便于校验与还原。",
-      "",
-      "========================================",
-      "",
-    ].join("\n");
-
-    const body = files
-      .map((file) =>
-        [
-          `FILE: ${file.path}`,
-          `LANG: ${file.language}`,
-          "----------------------------------------",
-          `\`\`\`${file.language}`,
-          file.content.replace(/\s+$/u, ""),
-          "```",
-          "",
-          "========================================",
-          "",
-        ].join("\n"),
-      )
-      .join("");
-
-    const blob = new Blob([header + body], { type: "text/plain;charset=utf-8" });
-    if (codeTxtUrlRef.current) URL.revokeObjectURL(codeTxtUrlRef.current);
-    const url = URL.createObjectURL(blob);
-    codeTxtUrlRef.current = url;
-    setCodeTxtUrl(url);
-
-    const anchor = document.createElement("a");
-    anchor.href = url;
-    anchor.download = "VN_全部代码.txt";
-    document.body.appendChild(anchor);
-    anchor.click();
-    anchor.remove();
-  };
-
-  useEffect(() => {
-    return () => {
-      if (codeTxtUrlRef.current) URL.revokeObjectURL(codeTxtUrlRef.current);
-    };
-  }, []);
 
   const effectClasses = [
     effectActive === "shake" ? "fx-shake" : "",
@@ -1146,7 +1049,7 @@ export function useVnRuntime() {
               setAuto(false);
               setSkip(false);
             }}
-            onExportCode={handleExportAllCodeTxt}
+            onExportCode={exportAllCodeTxt}
           />
 
           <PlayingPanelsView
