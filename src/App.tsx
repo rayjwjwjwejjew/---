@@ -16,7 +16,9 @@ import {
   type Settings,
 } from "./vnCore";
 import { queueImagePreload } from "./vnMedia";
+import { CORNER_IMG_URL, CREDITS_BLOCKS, QA_ITEMS, TITLE_SCREEN_BG } from "./vnContent";
 import { AssetsPanel, SettingsPanel } from "./vnPanels";
+import { buildExportSourceFiles } from "./vnSourceBundle";
 import { DustCanvas, RainCanvas, StageSprites } from "./vnVisuals";
 import {
   useAudioRuntime,
@@ -56,59 +58,10 @@ import {
   getSceneProgress,
   isEmphasisLine,
 } from "./vnDerived";
-import appSource from "./App.tsx?raw";
-import mainSource from "./main.tsx?raw";
-import engineSource from "./engine.ts?raw";
-import scriptSource from "./script.ts?raw";
-import dbSource from "./db.ts?raw";
-import cssSource from "./index.css?raw";
-import cnSource from "./utils/cn.ts?raw";
-import viteEnvSource from "./vite-env.d.ts?raw";
-import indexHtmlSource from "../index.html?raw";
-import gitignoreSource from "../.gitignore?raw";
-import workflowSource from "../.github/workflows/deploy-pages.yml?raw";
-import packageLockSource from "../package-lock.json?raw";
-import packageJsonSource from "../package.json?raw";
-import tsconfigSource from "../tsconfig.json?raw";
-import viteConfigSource from "../vite.config.ts?raw";
 type GamePhase = "warning" | "title" | "playing" | "credits";
 type LogItem = { who: string; text: string };
 
-const CREDITS_BLOCKS = [
-  { role: "原作 / 编剧", names: "Ray、Justin" },
-  { role: "导演 / 演出构成", names: "Ray、Justin" },
-  { role: "艺术总监", names: "Ray" },
-  { role: "角色设计", names: "公开素材整理 / 二次创作整合" },
-  { role: "视觉设计 / UI", names: "Ray、AI" },
-  { role: "程序实现", names: "AI" },
-  { role: "音乐构想", names: "Ray" },
-  { role: "音效设计", names: "Ray" },
-  { role: "剧情测试", names: "Ray、Justin" },
-];
-
-const TITLE_SCREEN_BG = "https://i.imgur.com/FAWl3AP.png";
-const CORNER_IMG_URL = "https://i.imgur.com/NVGVJiU.png";
-
-const QA_ITEMS = [
-  { q: "1、为什么做这个？", a: "m成分占比太高" },
-  { q: "2、后面还会更新吗？", a: "会，后面还会出第二部或者番外补充一些角色背景吧" },
-  { q: "3、这个奇怪生物是什么（重要)？", a: "后续我当做不影响剧情和体验的吐槽旁白，要在剧情点击才会进行吐槽" },
-  { q: "4、这个故事有原型吗？", a: "难说" },
-];
-
 const SCRIPT_SCENES = collectScriptScenes(SCRIPT.lines);
-
-function getCodeFenceLanguage(path: string): string {
-  if (path.endsWith(".tsx")) return "tsx";
-  if (path.endsWith(".ts")) return "ts";
-  if (path.endsWith(".css")) return "css";
-  if (path.endsWith(".html")) return "html";
-  if (path.endsWith(".json")) return "json";
-  if (path.endsWith(".yml") || path.endsWith(".yaml")) return "yaml";
-  if (path.endsWith(".md")) return "md";
-  if (path.endsWith(".d.ts")) return "ts";
-  return "text";
-}
 
 export function useVnRuntime() {
   const [index, setIndex] = useState(0);
@@ -302,27 +255,7 @@ export function useVnRuntime() {
       setShowLog(false);
     },
   });
-  const exportFiles = useMemo(
-    () =>
-      [
-        { path: ".gitignore", content: gitignoreSource },
-        { path: ".github/workflows/deploy-pages.yml", content: workflowSource },
-        { path: "index.html", content: indexHtmlSource },
-        { path: "package-lock.json", content: packageLockSource },
-        { path: "package.json", content: packageJsonSource },
-        { path: "tsconfig.json", content: tsconfigSource },
-        { path: "vite.config.ts", content: viteConfigSource },
-        { path: "src/main.tsx", content: mainSource },
-        { path: "src/App.tsx", content: appSource },
-        { path: "src/engine.ts", content: engineSource },
-        { path: "src/script.ts", content: scriptSource },
-        { path: "src/db.ts", content: dbSource },
-        { path: "src/index.css", content: cssSource },
-        { path: "src/vite-env.d.ts", content: viteEnvSource },
-        { path: "src/utils/cn.ts", content: cnSource },
-      ].map((file) => ({ ...file, language: getCodeFenceLanguage(file.path) })),
-    [],
-  );
+  const exportFiles = useMemo(() => buildExportSourceFiles(), []);
   const { codeTxtUrl, exportAllCodeTxt } = useCodeExportRuntime({ files: exportFiles });
 
   useEffect(() => {
