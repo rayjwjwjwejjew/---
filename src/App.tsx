@@ -22,6 +22,7 @@ import {
   useAudioRuntime,
   useBackgroundRuntime,
   useCodeExportRuntime,
+  useFlowRuntime,
   useLibraryRuntime,
   usePlaybackRuntime,
   usePresentationRuntime,
@@ -329,7 +330,6 @@ export function useVnRuntime() {
   const [showRain, setShowRain] = useState(false);
   const [sceneBlur, setSceneBlur] = useState(false);
   const [debugExpressionOverride, setDebugExpressionOverride] = useState<"calm" | "panic" | null>(null);
-  const [titleReady, setTitleReady] = useState(false);
   const [lowPerfMode, setLowPerfMode] = useState(false);
   const {
     showLog,
@@ -556,15 +556,6 @@ export function useVnRuntime() {
   }, []);
 
   useEffect(() => {
-    if (phase === "title") {
-      const timer = window.setTimeout(() => setTitleReady(true), 120);
-      return () => window.clearTimeout(timer);
-    }
-    setTitleReady(false);
-    return undefined;
-  }, [phase]);
-
-  useEffect(() => {
     const root = document.documentElement.style;
     root.setProperty("--dim", `${settings.dim / 100}`);
     root.setProperty("--sprite-w", `${settings.spriteW}px`);
@@ -633,56 +624,42 @@ export function useVnRuntime() {
     setCurrentAct(curLine.act);
   }, [curLine, phase]);
 
-  const startNewGame = () => {
-    if (startTransitioning) return;
-    setStartTransitioning(true);
-    setScreenFlashVisible(true);
-    triggerOpeningPrelude("第一幕 · 章节开启");
-    setIndex(0);
-    setLog([]);
-    clearLastBackground();
-    setActivePanel(null);
-    resetPresentationState();
-    setOpeningPreludeVisible(true);
-    stopBgm();
-    window.setTimeout(() => {
-      setPhase("playing");
-      setHudAwake(true);
-    }, lowPerfMode ? 180 : 260);
-    window.setTimeout(() => {
-      setScreenFlashVisible(false);
-      setStartTransitioning(false);
-    }, lowPerfMode ? 620 : 720);
-  };
-
-  const togglePanel = (name: string) => {
-    if (!isEditorMode && (name === "assets" || name === "debug")) return;
-    pulseUi("ui");
-    setActivePanel((prev) => (prev === name ? null : name));
-  };
-
-  useEffect(() => {
-    const handler = (event: KeyboardEvent) => {
-      if (phase === "warning") return;
-      if (phase === "title") {
-        if (event.key === "Escape") {
-          setActivePanel(null);
-          setShowQaPanel(false);
-          setOpenQaIndex(null);
-          return;
-        }
-        if ((event.key === " " || event.key === "Enter") && !activePanel && !showQaPanel) {
-          event.preventDefault();
-          startNewGame();
-        }
-        return;
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => {
-      window.removeEventListener("keydown", handler);
-    };
-  }, [activePanel, phase, showQaPanel]);
+  const {
+    titleReady,
+    startNewGame,
+    togglePanel,
+    returnToTitle,
+    toggleWorkspaceMode,
+  } = useFlowRuntime({
+    phase,
+    lowPerfMode,
+    startTransitioning,
+    isEditorMode,
+    activePanel,
+    showQaPanel,
+    pulseUi,
+    onSetPhase: (nextPhase) => setPhase(nextPhase as GamePhase),
+    onSetIndex: setIndex,
+    onClearLog: () => setLog([]),
+    onClearLastBackground: clearLastBackground,
+    onClosePanels: () => {
+      setActivePanel(null);
+      setShowLog(false);
+      setShowQaPanel(false);
+      setOpenQaIndex(null);
+    },
+    onResetPresentationState: resetPresentationState,
+    onStopBgm: stopBgm,
+    onSetScreenFlashVisible: setScreenFlashVisible,
+    onSetStartTransitioning: setStartTransitioning,
+    onTriggerOpeningPrelude: triggerOpeningPrelude,
+    onSetOpeningPreludeVisible: setOpeningPreludeVisible,
+    onSetHudAwake: setHudAwake,
+    onToggleWorkspaceMode: () => setWorkspaceMode((value) => (value === "editor" ? "player" : "editor")),
+    onSetShowQaPanel: setShowQaPanel,
+    onSetOpenQaIndex: setOpenQaIndex,
+    onSetActivePanel: setActivePanel,
+  });
 
   const effectClasses = [
     effectActive === "shake" ? "fx-shake" : "",
@@ -852,7 +829,7 @@ export function useVnRuntime() {
                   <span>资源管理</span>
                 </button>
               )}
-              <button className="title-btn" onClick={() => setWorkspaceMode((value) => (value === "editor" ? "player" : "editor"))}>
+              <button className="title-btn" onClick={toggleWorkspaceMode}>
                 <span className="title-btn-icon">{workspaceMode === "editor" ? "✦" : "✎"}</span>
                 <span>{workspaceMode === "editor" ? "玩家模式" : "编辑器模式"}</span>
               </button>
@@ -968,7 +945,7 @@ export function useVnRuntime() {
             creditsRollReady={creditsRollReady}
             titleBackgroundUrl={TITLE_SCREEN_BG}
             blocks={CREDITS_BLOCKS}
-            onReturn={() => setPhase("title")}
+            onReturn={returnToTitle}
           />
         </CreditsScene>
       )}
@@ -1043,9 +1020,9 @@ export function useVnRuntime() {
             }}
             onOpenLog={() => setShowLog(true)}
             onTogglePanel={togglePanel}
-            onToggleWorkspaceMode={() => setWorkspaceMode((value) => (value === "editor" ? "player" : "editor"))}
+            onToggleWorkspaceMode={toggleWorkspaceMode}
             onReturnTitle={() => {
-              setPhase("title");
+              returnToTitle();
               setAuto(false);
               setSkip(false);
             }}

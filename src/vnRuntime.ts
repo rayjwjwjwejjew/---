@@ -92,6 +92,32 @@ type UseLibraryRuntimeArgs = {
   onManifestChange?: (manifest: Manifest) => void;
 };
 
+type UseFlowRuntimeArgs = {
+  phase: string;
+  lowPerfMode: boolean;
+  startTransitioning: boolean;
+  isEditorMode: boolean;
+  activePanel: string | null;
+  showQaPanel: boolean;
+  pulseUi: (_layer?: string) => void;
+  onSetPhase: (phase: string) => void;
+  onSetIndex: (index: number) => void;
+  onClearLog: () => void;
+  onClearLastBackground: () => void;
+  onClosePanels: () => void;
+  onResetPresentationState: () => void;
+  onStopBgm: () => void;
+  onSetScreenFlashVisible: (visible: boolean) => void;
+  onSetStartTransitioning: (visible: boolean) => void;
+  onTriggerOpeningPrelude: (text: string) => void;
+  onSetOpeningPreludeVisible: (visible: boolean) => void;
+  onSetHudAwake: (visible: boolean) => void;
+  onToggleWorkspaceMode: () => void;
+  onSetShowQaPanel: (visible: boolean) => void;
+  onSetOpenQaIndex: (value: number | null) => void;
+  onSetActivePanel: (value: string | null | ((prev: string | null) => string | null)) => void;
+};
+
 function safeParseJson<T>(raw: string | null, fallback: T): T {
   if (!raw) return fallback;
   try {
@@ -261,6 +287,123 @@ export function useLibraryRuntime({ initialManifest, onManifestChange }: UseLibr
     refreshLibrary,
     uploadAsset,
     batchRenameResources,
+  };
+}
+
+export function useFlowRuntime({
+  phase,
+  lowPerfMode,
+  startTransitioning,
+  isEditorMode,
+  activePanel,
+  showQaPanel,
+  pulseUi,
+  onSetPhase,
+  onSetIndex,
+  onClearLog,
+  onClearLastBackground,
+  onClosePanels,
+  onResetPresentationState,
+  onStopBgm,
+  onSetScreenFlashVisible,
+  onSetStartTransitioning,
+  onTriggerOpeningPrelude,
+  onSetOpeningPreludeVisible,
+  onSetHudAwake,
+  onToggleWorkspaceMode,
+  onSetShowQaPanel,
+  onSetOpenQaIndex,
+  onSetActivePanel,
+}: UseFlowRuntimeArgs) {
+  const [titleReady, setTitleReady] = useState(false);
+
+  useEffect(() => {
+    if (phase === "title") {
+      const timer = window.setTimeout(() => setTitleReady(true), 120);
+      return () => window.clearTimeout(timer);
+    }
+    setTitleReady(false);
+    return undefined;
+  }, [phase]);
+
+  const startNewGame = useCallback(() => {
+    if (startTransitioning) return;
+    onSetStartTransitioning(true);
+    onSetScreenFlashVisible(true);
+    onTriggerOpeningPrelude("第一幕 · 章节开启");
+    onSetIndex(0);
+    onClearLog();
+    onClearLastBackground();
+    onClosePanels();
+    onResetPresentationState();
+    onSetOpeningPreludeVisible(true);
+    onStopBgm();
+    window.setTimeout(() => {
+      onSetPhase("playing");
+      onSetHudAwake(true);
+    }, lowPerfMode ? 180 : 260);
+    window.setTimeout(() => {
+      onSetScreenFlashVisible(false);
+      onSetStartTransitioning(false);
+    }, lowPerfMode ? 620 : 720);
+  }, [
+    lowPerfMode,
+    onClearLastBackground,
+    onClearLog,
+    onClosePanels,
+    onResetPresentationState,
+    onSetHudAwake,
+    onSetIndex,
+    onSetOpeningPreludeVisible,
+    onSetPhase,
+    onSetScreenFlashVisible,
+    onSetStartTransitioning,
+    onStopBgm,
+    onTriggerOpeningPrelude,
+    startTransitioning,
+  ]);
+
+  const togglePanel = useCallback(
+    (name: string) => {
+      if (!isEditorMode && (name === "assets" || name === "debug")) return;
+      pulseUi("ui");
+      onSetActivePanel((prev) => (prev === name ? null : name));
+    },
+    [isEditorMode, onSetActivePanel, pulseUi],
+  );
+
+  const returnToTitle = useCallback(() => {
+    onSetPhase("title");
+  }, [onSetPhase]);
+
+  useEffect(() => {
+    const handler = (event: KeyboardEvent) => {
+      if (phase === "warning") return;
+      if (phase === "title") {
+        if (event.key === "Escape") {
+          onSetActivePanel(null);
+          onSetShowQaPanel(false);
+          onSetOpenQaIndex(null);
+          return;
+        }
+        if ((event.key === " " || event.key === "Enter") && !activePanel && !showQaPanel) {
+          event.preventDefault();
+          startNewGame();
+        }
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => {
+      window.removeEventListener("keydown", handler);
+    };
+  }, [activePanel, onSetActivePanel, onSetOpenQaIndex, onSetShowQaPanel, phase, showQaPanel, startNewGame]);
+
+  return {
+    titleReady,
+    startNewGame,
+    togglePanel,
+    returnToTitle,
+    toggleWorkspaceMode: onToggleWorkspaceMode,
   };
 }
 
