@@ -1,6 +1,6 @@
-import type { ReactNode } from "react";
+import type { ComponentProps, ReactNode } from "react";
 import type { ChoiceTone } from "./vnDerived";
-import type { AssetEntry, Manifest, SaveSlot, Settings } from "./vnCore";
+import type { SaveSlot, Settings } from "./vnCore";
 import { AssetsPanel, BgmPanel, DebugPanel, SavePanel, SettingsPanel } from "./vnPanels";
 import { DustCanvas } from "./vnVisuals";
 
@@ -672,36 +672,7 @@ type PlayingPanelsViewProps = {
   currentEffect?: string;
   onSettingsChange: (updater: (value: Settings) => Settings) => void;
   onSettingsReset: () => void;
-  onUploadAsset: (kind: "bg" | "sprite" | "video" | "bgm" | "sfx") => void;
-  sceneQuery: string;
-  onSceneQueryChange: (value: string) => void;
-  selectedSceneName: string;
-  onSelectedSceneNameChange: (value: string) => void;
-  filteredScenes: string[];
-  selectedBackgroundAssetId: string;
-  onSelectedBackgroundAssetIdChange: (value: string) => void;
-  backgroundAssetEntries: AssetEntry[];
-  customSceneBgUrl: string;
-  onCustomSceneBgUrlChange: (value: string) => void;
-  onPreviewSceneBackground: (scene: string) => void;
-  onApplySceneBackground: (scene: string, assetId: string | null) => void;
-  onBindSceneUrl: (scene: string, url: string) => void;
-  onClearSceneBinding: (scene: string) => void;
-  currentBindingText: string;
-  assetQuery: string;
-  onAssetQueryChange: (value: string) => void;
-  assetFilter: keyof Manifest | "all";
-  onAssetFilterChange: (value: keyof Manifest | "all") => void;
-  onBatchRename: () => void;
-  bgmCount: number;
-  sfxCount: number;
-  resourceEntries: { kind: keyof Manifest | "all"; id: string; label: string }[];
-  filteredResources: { kind: keyof Manifest | "all"; id: string; label: string }[];
-  onCopyResourceName: (value: string) => void;
-  resourcePage: number;
-  resourcePageCount: number;
-  resourceCount: number;
-  onResourcePageChange: (value: number) => void;
+  assetsPanelProps: ComponentProps<typeof AssetsPanel>;
   selectedSaveSlot: number;
   onSelectedSaveSlotChange: (value: number) => void;
   onSaveCurrentSlot: () => void;
@@ -746,36 +717,7 @@ export function PlayingPanelsView({
   currentEffect,
   onSettingsChange,
   onSettingsReset,
-  onUploadAsset,
-  sceneQuery,
-  onSceneQueryChange,
-  selectedSceneName,
-  onSelectedSceneNameChange,
-  filteredScenes,
-  selectedBackgroundAssetId,
-  onSelectedBackgroundAssetIdChange,
-  backgroundAssetEntries,
-  customSceneBgUrl,
-  onCustomSceneBgUrlChange,
-  onPreviewSceneBackground,
-  onApplySceneBackground,
-  onBindSceneUrl,
-  onClearSceneBinding,
-  currentBindingText,
-  assetQuery,
-  onAssetQueryChange,
-  assetFilter,
-  onAssetFilterChange,
-  onBatchRename,
-  bgmCount,
-  sfxCount,
-  resourceEntries,
-  filteredResources,
-  onCopyResourceName,
-  resourcePage,
-  resourcePageCount,
-  resourceCount,
-  onResourcePageChange,
+  assetsPanelProps,
   selectedSaveSlot,
   onSelectedSaveSlotChange,
   onSaveCurrentSlot,
@@ -813,38 +755,7 @@ export function PlayingPanelsView({
     <>
       {isEditorMode && activePanel === "assets" && (
         <div className="panel show">
-          <AssetsPanel
-            onUploadAsset={onUploadAsset}
-            sceneQuery={sceneQuery}
-            onSceneQueryChange={onSceneQueryChange}
-            selectedSceneName={selectedSceneName}
-            onSelectedSceneNameChange={onSelectedSceneNameChange}
-            filteredScenes={filteredScenes}
-            selectedBackgroundAssetId={selectedBackgroundAssetId}
-            onSelectedBackgroundAssetIdChange={onSelectedBackgroundAssetIdChange}
-            backgroundAssetEntries={backgroundAssetEntries}
-            customSceneBgUrl={customSceneBgUrl}
-            onCustomSceneBgUrlChange={onCustomSceneBgUrlChange}
-            onPreviewSceneBackground={onPreviewSceneBackground}
-            onApplySceneBackground={onApplySceneBackground}
-            onBindSceneUrl={onBindSceneUrl}
-            onClearSceneBinding={onClearSceneBinding}
-            currentBindingText={currentBindingText}
-            assetQuery={assetQuery}
-            onAssetQueryChange={onAssetQueryChange}
-            assetFilter={assetFilter}
-            onAssetFilterChange={onAssetFilterChange}
-            onBatchRename={onBatchRename}
-            bgmCount={bgmCount}
-            sfxCount={sfxCount}
-            resourceEntries={resourceEntries}
-            filteredResources={filteredResources}
-            onCopyResourceName={onCopyResourceName}
-            resourcePage={resourcePage}
-            resourcePageCount={resourcePageCount}
-            resourceCount={resourceCount}
-            onResourcePageChange={onResourcePageChange}
-          />
+          <AssetsPanel {...assetsPanelProps} />
         </div>
       )}
 

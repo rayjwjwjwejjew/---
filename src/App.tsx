@@ -341,6 +341,17 @@ export function useVnRuntime() {
     () => filterResourceEntries(resourceEntries, assetQuery, assetFilter),
     [assetFilter, assetQuery, resourceEntries],
   );
+  const currentBindingText = useMemo(
+    () =>
+      selectedSceneName && sceneBgOverrides[selectedSceneName]
+        ? `${sceneBgOverrides[selectedSceneName].source === "asset" ? "资源" : "URL"} · ${sceneBgOverrides[selectedSceneName].label}`
+        : "未绑定",
+    [sceneBgOverrides, selectedSceneName],
+  );
+  const handleCopyResourceName = useCallback((value: string) => {
+    navigator.clipboard?.writeText(value).catch(() => undefined);
+    setAssetQuery(value);
+  }, [setAssetQuery]);
   const getSavePreview = useCallback(
     (slot: SaveSlot | null, slotIndex: number) => {
       if (!slot) {
@@ -377,6 +388,71 @@ export function useVnRuntime() {
   const filteredScenes = useMemo(
     () => filterSceneNames(SCRIPT_SCENES, sceneQuery),
     [sceneQuery],
+  );
+  const assetsPanelProps = useMemo(
+    () => ({
+      onUploadAsset: uploadAsset,
+      sceneQuery,
+      onSceneQueryChange: setSceneQuery,
+      selectedSceneName,
+      onSelectedSceneNameChange: setSelectedSceneName,
+      filteredScenes,
+      selectedBackgroundAssetId,
+      onSelectedBackgroundAssetIdChange: setSelectedBackgroundAssetId,
+      backgroundAssetEntries,
+      customSceneBgUrl,
+      onCustomSceneBgUrlChange: setCustomSceneBgUrl,
+      onPreviewSceneBackground: previewSceneBackground,
+      onApplySceneBackground: applySceneBackground,
+      onBindSceneUrl: bindSceneUrl,
+      onClearSceneBinding: clearSceneBinding,
+      currentBindingText,
+      assetQuery,
+      onAssetQueryChange: setAssetQuery,
+      assetFilter,
+      onAssetFilterChange: setAssetFilter,
+      onBatchRename: batchRenameResources,
+      bgmCount: bgmList.length,
+      sfxCount: sfxList.length,
+      resourceEntries,
+      filteredResources,
+      onCopyResourceName: handleCopyResourceName,
+      resourcePage,
+      resourcePageCount,
+      resourceCount: filteredResources.length,
+      onResourcePageChange: setResourcePage,
+    }),
+    [
+      applySceneBackground,
+      assetFilter,
+      assetQuery,
+      backgroundAssetEntries,
+      batchRenameResources,
+      bgmList.length,
+      bindSceneUrl,
+      clearSceneBinding,
+      currentBindingText,
+      customSceneBgUrl,
+      filteredResources,
+      filteredScenes,
+      handleCopyResourceName,
+      previewSceneBackground,
+      resourceEntries,
+      resourcePage,
+      resourcePageCount,
+      sceneQuery,
+      selectedBackgroundAssetId,
+      selectedSceneName,
+      setAssetFilter,
+      setAssetQuery,
+      setCustomSceneBgUrl,
+      setResourcePage,
+      setSceneQuery,
+      setSelectedBackgroundAssetId,
+      setSelectedSceneName,
+      sfxList.length,
+      uploadAsset,
+    ],
   );
   useEffect(() => {
     if (resourcePage >= resourcePageCount) {
@@ -437,45 +513,7 @@ export function useVnRuntime() {
             {activePanel === "settings" ? (
               <SettingsPanel settings={settings} onChange={setSettings} onReset={() => setSettings(DEFAULT_SETTINGS)} />
             ) : (
-              <AssetsPanel
-                onUploadAsset={uploadAsset}
-                sceneQuery={sceneQuery}
-                onSceneQueryChange={setSceneQuery}
-                selectedSceneName={selectedSceneName}
-                onSelectedSceneNameChange={setSelectedSceneName}
-                filteredScenes={filteredScenes}
-                selectedBackgroundAssetId={selectedBackgroundAssetId}
-                onSelectedBackgroundAssetIdChange={setSelectedBackgroundAssetId}
-                backgroundAssetEntries={backgroundAssetEntries}
-                customSceneBgUrl={customSceneBgUrl}
-                onCustomSceneBgUrlChange={setCustomSceneBgUrl}
-                onPreviewSceneBackground={previewSceneBackground}
-                onApplySceneBackground={applySceneBackground}
-                onBindSceneUrl={bindSceneUrl}
-                onClearSceneBinding={clearSceneBinding}
-                currentBindingText={
-                  selectedSceneName && sceneBgOverrides[selectedSceneName]
-                    ? `${sceneBgOverrides[selectedSceneName].source === "asset" ? "资源" : "URL"} · ${sceneBgOverrides[selectedSceneName].label}`
-                    : "未绑定"
-                }
-                assetQuery={assetQuery}
-                onAssetQueryChange={setAssetQuery}
-                assetFilter={assetFilter}
-                onAssetFilterChange={setAssetFilter}
-                onBatchRename={batchRenameResources}
-                bgmCount={bgmList.length}
-                sfxCount={sfxList.length}
-                resourceEntries={resourceEntries}
-                filteredResources={filteredResources}
-                onCopyResourceName={(value) => {
-                  navigator.clipboard?.writeText(value).catch(() => undefined);
-                  setAssetQuery(value);
-                }}
-                resourcePage={resourcePage}
-                resourcePageCount={resourcePageCount}
-                resourceCount={filteredResources.length}
-                onResourcePageChange={setResourcePage}
-              />
+              <AssetsPanel {...assetsPanelProps} />
             )}
           </TitleSystemPanel>
         </TitleScene>
@@ -581,43 +619,7 @@ export function useVnRuntime() {
             currentEffect={curLine?.effect}
             onSettingsChange={setSettings}
             onSettingsReset={() => setSettings(DEFAULT_SETTINGS)}
-            onUploadAsset={uploadAsset}
-            sceneQuery={sceneQuery}
-            onSceneQueryChange={setSceneQuery}
-            selectedSceneName={selectedSceneName}
-            onSelectedSceneNameChange={setSelectedSceneName}
-            filteredScenes={filteredScenes}
-            selectedBackgroundAssetId={selectedBackgroundAssetId}
-            onSelectedBackgroundAssetIdChange={setSelectedBackgroundAssetId}
-            backgroundAssetEntries={backgroundAssetEntries}
-            customSceneBgUrl={customSceneBgUrl}
-            onCustomSceneBgUrlChange={setCustomSceneBgUrl}
-            onPreviewSceneBackground={previewSceneBackground}
-            onApplySceneBackground={applySceneBackground}
-            onBindSceneUrl={bindSceneUrl}
-            onClearSceneBinding={clearSceneBinding}
-            currentBindingText={
-              selectedSceneName && sceneBgOverrides[selectedSceneName]
-                ? `${sceneBgOverrides[selectedSceneName].source === "asset" ? "资源" : "URL"} · ${sceneBgOverrides[selectedSceneName].label}`
-                : "未绑定"
-            }
-            assetQuery={assetQuery}
-            onAssetQueryChange={setAssetQuery}
-            assetFilter={assetFilter}
-            onAssetFilterChange={setAssetFilter}
-            onBatchRename={batchRenameResources}
-            bgmCount={bgmList.length}
-            sfxCount={sfxList.length}
-            resourceEntries={resourceEntries}
-            filteredResources={filteredResources}
-            onCopyResourceName={(value) => {
-              navigator.clipboard?.writeText(value).catch(() => undefined);
-              setAssetQuery(value);
-            }}
-            resourcePage={resourcePage}
-            resourcePageCount={resourcePageCount}
-            resourceCount={filteredResources.length}
-            onResourcePageChange={setResourcePage}
+            assetsPanelProps={assetsPanelProps}
             selectedSaveSlot={selectedSaveSlot}
             onSelectedSaveSlotChange={setSelectedSaveSlot}
             onSaveCurrentSlot={() => saveGame(selectedSaveSlot, true)}
