@@ -3,7 +3,7 @@ import { AssetDB } from "./db";
 import { DEFAULT_BG, SCRIPT, getSceneBg, getSceneCharacters, getSpecialBg } from "./engine";
 import type { StageCharacter } from "./engine";
 import { ensureImageReady, queueImagePreload } from "./vnMedia";
-import { getBgmMoodClass, getCurrentBgmLabel } from "./vnDerived";
+import { findBestAssetMatch, getBgmMoodClass, getCurrentBgmLabel } from "./vnDerived";
 import {
   readSceneBgOverrides,
   type Manifest,
@@ -36,6 +36,18 @@ type UseBackgroundRuntimeArgs = {
   phase: string;
   lowPerfMode: boolean;
   pulseUi: (_layer?: string) => void;
+};
+
+type UsePresentationRuntimeArgs = {
+  index: number;
+  line?: ScriptLine;
+  phase: string;
+  bgUrl: string;
+  videoManifest?: { id: string; label: string }[];
+  resolveSceneBackground: (scene: string | undefined) => string;
+  lowPerfMode: boolean;
+  pulseUi: (_layer?: string) => void;
+  onAdvance: () => void;
 };
 
 export function isKeySceneTransition(line?: ScriptLine) {
@@ -349,6 +361,197 @@ export function useBackgroundRuntime({
     clearSceneBinding,
     clearLastBackground,
     showImmediateBackground,
+  };
+}
+
+export function usePresentationRuntime({
+  index,
+  line,
+  phase,
+  bgUrl,
+  videoManifest,
+  resolveSceneBackground,
+  lowPerfMode,
+  pulseUi,
+  onAdvance,
+}: UsePresentationRuntimeArgs) {
+  const [cgVisible, setCgVisible] = useState(false);
+  const [cgClosing, setCgClosing] = useState(false);
+  const [cgMediaKind, setCgMediaKind] = useState<"image" | "video">("image");
+  const [cgImageUrl, setCgImageUrl] = useState("");
+  const [cgVideoUrl, setCgVideoUrl] = useState("");
+  const [startTransitioning, setStartTransitioning] = useState(false);
+  const [screenFlashVisible, setScreenFlashVisible] = useState(false);
+  const [creditsRollReady, setCreditsRollReady] = useState(false);
+  const [openingPreludeVisible, setOpeningPreludeVisible] = useState(false);
+  const [openingPreludeText, setOpeningPreludeText] = useState("第一幕 · 正在展开");
+
+  const cgVideoUrlRef = useRef("");
+  const cgVideoRef = useRef<HTMLVideoElement>(null);
+  const cgCloseTimerRef = useRef<number | null>(null);
+  const preludeTimerRef = useRef<number | null>(null);
+  const cgSeenRef = useRef("");
+
+  useEffect(() => {
+    if (phase !== "credits") {
+      setCreditsRollReady(false);
+      return;
+    }
+    setCreditsRollReady(false);
+    const timer = window.setTimeout(() => setCreditsRollReady(true), lowPerfMode ? 900 : 1600);
+    return () => window.clearTimeout(timer);
+  }, [lowPerfMode, phase]);
+
+  useEffect(() => {
+    if (cgCloseTimerRef.current) {
+      window.clearTimeout(cgCloseTimerRef.current);
+      cgCloseTimerRef.current = null;
+    }
+    if (phase !== "playing" || !line?.cg || cgVisible) return;
+    const cgKey = `${index}:${line.cg}`;
+    if (cgSeenRef.current === cgKey) return;
+    let cancelled = false;
+    const posterUrl = resolveSceneBackground(line.scene) || bgUrl || DEFAULT_BG;
+    pulseUi("cg");
+
+    const openCgWithPoster = () => {
+      void ensureImageReady(posterUrl).then(() => {
+        if (cancelled) return;
+        if (cgVideoUrlRef.current) {
+          URL.revokeObjectURL(cgVideoUrlRef.current);
+          cgVideoUrlRef.current = "";
+        }
+        setCgMediaKind("image");
+        setCgVideoUrl("");
+        setCgImageUrl(posterUrl);
+        setCgClosing(false);
+        setCgVisible(true);
+        cgSeenRef.current = cgKey;
+        setOpeningPreludeVisible(false);
+      });
+    };
+
+    const videoMatch = findBestAssetMatch(videoManifest, [line.cg, line.scene || "", "cg", "视频"]);
+    if (videoMatch) {
+      void AssetDB.get<Blob>(AssetDB.STORE_ASSETS, videoMatch.id)
+        .then((blob) => {
+          if (!blob || cancelled) return null;
+          const url = URL.createObjectURL(blob);
+          if (cgVideoUrlRef.current) {
+            URL.revokeObjectURL(cgVideoUrlRef.current);
+          }
+          cgVideoUrlRef.current = url;
+          return url;
+        })
+        .then((url) => {
+          if (!url || cancelled) {
+            openCgWithPoster();
+            return;
+          }
+          void ensureImageReady(posterUrl).then(() => {
+            if (cancelled) return;
+            setCgMediaKind("video");
+            setCgVideoUrl(url);
+            setCgImageUrl(posterUrl);
+            setCgClosing(false);
+            setCgVisible(true);
+            cgSeenRef.current = cgKey;
+            setOpeningPreludeVisible(false);
+          });
+        })
+        .catch(() => {
+          openCgWithPoster();
+        });
+      return () => {
+        cancelled = true;
+      };
+    }
+
+    openCgWithPoster();
+    return () => {
+      cancelled = true;
+    };
+  }, [bgUrl, cgVisible, index, line, phase, pulseUi, resolveSceneBackground, videoManifest]);
+
+  useEffect(() => {
+    if (!cgVisible || cgMediaKind !== "video") return;
+    const video = cgVideoRef.current;
+    if (!video) return;
+    video.currentTime = 0;
+    void video.play().catch(() => undefined);
+  }, [cgMediaKind, cgVisible, cgVideoUrl]);
+
+  const closeCg = useCallback((advance = false) => {
+    if (!cgVisible) return;
+    cgSeenRef.current = `${index}:${line?.cg || ""}`;
+    setCgClosing(true);
+    pulseUi("cg");
+    if (cgCloseTimerRef.current) window.clearTimeout(cgCloseTimerRef.current);
+    cgCloseTimerRef.current = window.setTimeout(() => {
+      if (cgVideoUrlRef.current) {
+        URL.revokeObjectURL(cgVideoUrlRef.current);
+        cgVideoUrlRef.current = "";
+      }
+      setCgVisible(false);
+      setCgClosing(false);
+      setCgMediaKind("image");
+      setCgVideoUrl("");
+      if (advance && phase === "playing") {
+        onAdvance();
+      }
+      cgCloseTimerRef.current = null;
+    }, 240);
+  }, [cgVisible, index, line?.cg, onAdvance, phase, pulseUi]);
+
+  const triggerOpeningPrelude = useCallback((text: string) => {
+    if (preludeTimerRef.current) window.clearTimeout(preludeTimerRef.current);
+    setOpeningPreludeText(text);
+    setOpeningPreludeVisible(true);
+    preludeTimerRef.current = window.setTimeout(() => {
+      setOpeningPreludeVisible(false);
+      preludeTimerRef.current = null;
+    }, 1500);
+  }, []);
+
+  const resetPresentationState = useCallback(() => {
+    setOpeningPreludeVisible(false);
+    setCgClosing(false);
+    setCgMediaKind("image");
+    setCgVideoUrl("");
+    cgSeenRef.current = "";
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (cgVideoUrlRef.current) URL.revokeObjectURL(cgVideoUrlRef.current);
+      if (cgCloseTimerRef.current) window.clearTimeout(cgCloseTimerRef.current);
+      if (preludeTimerRef.current) window.clearTimeout(preludeTimerRef.current);
+    };
+  }, []);
+
+  return {
+    cgVisible,
+    cgClosing,
+    cgMediaKind,
+    cgImageUrl,
+    cgVideoUrl,
+    cgVideoRef,
+    startTransitioning,
+    screenFlashVisible,
+    creditsRollReady,
+    openingPreludeVisible,
+    openingPreludeText,
+    setCgVisible,
+    setCgClosing,
+    setCgMediaKind,
+    setCgImageUrl,
+    setCgVideoUrl,
+    setStartTransitioning,
+    setScreenFlashVisible,
+    setOpeningPreludeVisible,
+    closeCg,
+    triggerOpeningPrelude,
+    resetPresentationState,
   };
 }
 

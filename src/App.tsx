@@ -21,9 +21,9 @@ import {
   type Settings,
   writeSaveSlots,
 } from "./vnCore";
-import { ensureImageReady, queueImagePreload } from "./vnMedia";
+import { queueImagePreload } from "./vnMedia";
 import { AssetsPanel, BgmPanel, DebugPanel, SavePanel, SettingsPanel } from "./vnPanels";
-import { useAudioRuntime, useBackgroundRuntime, useSceneRuntime } from "./vnRuntime";
+import { useAudioRuntime, useBackgroundRuntime, usePresentationRuntime, useSceneRuntime } from "./vnRuntime";
 import { CreditsScene, PlayingScene, TitleScene } from "./vnScenes";
 import {
   buildDebugMarkers,
@@ -31,7 +31,6 @@ import {
   buildResourceEntries,
   filterResourceEntries,
   filterSceneNames,
-  findBestAssetMatch,
   getCgCaption,
   getChoiceTone,
   getChoiceToneLabel,
@@ -380,16 +379,8 @@ export function useVnRuntime() {
   const [sfxList, setSfxList] = useState<{ id: string; label: string }[]>([]);
   const [titleReady, setTitleReady] = useState(false);
   const [textVisible, setTextVisible] = useState(true);
-  const [cgVisible, setCgVisible] = useState(false);
-  const [cgClosing, setCgClosing] = useState(false);
-  const [cgMediaKind, setCgMediaKind] = useState<"image" | "video">("image");
-  const [cgImageUrl, setCgImageUrl] = useState("");
-  const [cgVideoUrl, setCgVideoUrl] = useState("");
   const [lowPerfMode, setLowPerfMode] = useState(false);
   const [hudAwake, setHudAwake] = useState(false);
-  const [startTransitioning, setStartTransitioning] = useState(false);
-  const [screenFlashVisible, setScreenFlashVisible] = useState(false);
-  const [creditsRollReady, setCreditsRollReady] = useState(false);
   const [saveSlots, setSaveSlots] = useState<Array<SaveSlot | null>>(() => readSaveSlots(SAVE_SLOT_COUNT));
   const [selectedSaveSlot, setSelectedSaveSlot] = useState(0);
   const workspaceMode = ui.workspaceMode;
@@ -402,8 +393,6 @@ export function useVnRuntime() {
     normalizeManifest(readJson<Manifest>(STORAGE_KEYS.manifest, {})),
   );
   const [sceneQuery, setSceneQuery] = useState("");
-  const [openingPreludeVisible, setOpeningPreludeVisible] = useState(false);
-  const [openingPreludeText, setOpeningPreludeText] = useState("第一幕 · 正在展开");
   const particlesEnabled = settings.particlesEnabled && !lowPerfMode;
 
   const autoTimeoutRef = useRef<number | null>(null);
@@ -411,11 +400,6 @@ export function useVnRuntime() {
   const typingDelayRef = useRef<number | null>(null);
   const hudSleepRef = useRef<number | null>(null);
   const codeTxtUrlRef = useRef("");
-  const cgVideoUrlRef = useRef("");
-  const cgVideoRef = useRef<HTMLVideoElement>(null);
-  const cgCloseTimerRef = useRef<number | null>(null);
-  const preludeTimerRef = useRef<number | null>(null);
-  const cgSeenRef = useRef("");
 
   const setShowLog = useCallback((value: boolean | ((prev: boolean) => boolean)) => {
     setUi((prev) => ({
@@ -497,6 +481,38 @@ export function useVnRuntime() {
     lowPerfMode,
     pulseUi,
   });
+  const {
+    cgVisible,
+    cgClosing,
+    cgMediaKind,
+    cgImageUrl,
+    cgVideoUrl,
+    cgVideoRef,
+    startTransitioning,
+    screenFlashVisible,
+    creditsRollReady,
+    openingPreludeVisible,
+    openingPreludeText,
+    setCgVisible,
+    setCgMediaKind,
+    setCgImageUrl,
+    setStartTransitioning,
+    setScreenFlashVisible,
+    setOpeningPreludeVisible,
+    closeCg,
+    triggerOpeningPrelude,
+    resetPresentationState,
+  } = usePresentationRuntime({
+    index,
+    line: curLine,
+    phase,
+    bgUrl,
+    videoManifest: manifestState.video,
+    resolveSceneBackground,
+    lowPerfMode,
+    pulseUi,
+    onAdvance: () => setIndex((value) => Math.min(SCRIPT.lines.length, value + 1)),
+  });
 
   useEffect(() => {
     const reducedMotionQuery = window.matchMedia("(prefers-reduced-motion: reduce)");
@@ -526,16 +542,6 @@ export function useVnRuntime() {
     setTitleReady(false);
     return undefined;
   }, [phase]);
-
-  useEffect(() => {
-    if (phase !== "credits") {
-      setCreditsRollReady(false);
-      return;
-    }
-    setCreditsRollReady(false);
-    const timer = window.setTimeout(() => setCreditsRollReady(true), lowPerfMode ? 900 : 1600);
-    return () => window.clearTimeout(timer);
-  }, [lowPerfMode, phase]);
 
   useEffect(() => {
     const root = document.documentElement.style;
@@ -614,84 +620,6 @@ export function useVnRuntime() {
     }
     return undefined;
   }, [curLine, lowPerfMode, particlesEnabled, phase, triggerEffect]);
-
-  useEffect(() => {
-    if (cgCloseTimerRef.current) {
-      window.clearTimeout(cgCloseTimerRef.current);
-      cgCloseTimerRef.current = null;
-    }
-    if (phase !== "playing" || !curLine?.cg || cgVisible) return;
-    const cgKey = `${index}:${curLine.cg}`;
-    if (cgSeenRef.current === cgKey) return;
-    let cancelled = false;
-    const posterUrl = resolveSceneBackground(curLine.scene) || bgUrl || DEFAULT_BG;
-    pulseUi("cg");
-    const openCgWithPoster = () => {
-      void ensureImageReady(posterUrl).then(() => {
-        if (cancelled) return;
-        if (cgVideoUrlRef.current) {
-          URL.revokeObjectURL(cgVideoUrlRef.current);
-          cgVideoUrlRef.current = "";
-        }
-        setCgMediaKind("image");
-        setCgVideoUrl("");
-        setCgImageUrl(posterUrl);
-        setCgClosing(false);
-        setCgVisible(true);
-        cgSeenRef.current = cgKey;
-        setOpeningPreludeVisible(false);
-      });
-    };
-
-  const videoMatch = findBestAssetMatch(manifestState.video, [curLine.cg, curLine.scene || "", "cg", "视频"]);
-    if (videoMatch) {
-      void AssetDB.get<Blob>(AssetDB.STORE_ASSETS, videoMatch.id)
-        .then((blob) => {
-          if (!blob || cancelled) return null;
-          const url = URL.createObjectURL(blob);
-          if (cgVideoUrlRef.current) {
-            URL.revokeObjectURL(cgVideoUrlRef.current);
-          }
-          cgVideoUrlRef.current = url;
-          return url;
-        })
-        .then((url) => {
-          if (!url || cancelled) {
-            openCgWithPoster();
-            return;
-          }
-          void ensureImageReady(posterUrl).then(() => {
-            if (cancelled) return;
-            setCgMediaKind("video");
-            setCgVideoUrl(url);
-            setCgImageUrl(posterUrl);
-            setCgClosing(false);
-            setCgVisible(true);
-            cgSeenRef.current = cgKey;
-            setOpeningPreludeVisible(false);
-          });
-        })
-        .catch(() => {
-          openCgWithPoster();
-        });
-      return () => {
-        cancelled = true;
-      };
-    }
-
-    openCgWithPoster();
-    return () => {
-      cancelled = true;
-    };
-  }, [bgUrl, cgVisible, curLine, index, manifestState.video, phase, pulseUi]);
-
-  useEffect(() => {
-    if (!cgVisible || cgMediaKind !== "video") return;
-    const video = cgVideoRef.current;
-    if (!video) return;
-    video.currentTime = 0;
-    void video.play().catch(() => undefined);
-  }, [cgMediaKind, cgVisible, cgVideoUrl]);
 
   useEffect(() => {
     if (phase !== "playing" || !curLine?.bgm) return;
@@ -820,11 +748,7 @@ export function useVnRuntime() {
       setShowLog(false);
       setAuto(false);
       setSkip(false);
-      setOpeningPreludeVisible(false);
-      setCgClosing(false);
-      setCgMediaKind("image");
-      setCgVideoUrl("");
-      cgSeenRef.current = "";
+      resetPresentationState();
       stopBgm();
       const match = bgmList.find((item) => item.label === slot.bgmName || item.label.includes(slot.bgmName || ""));
       if (match) {
@@ -849,11 +773,7 @@ export function useVnRuntime() {
     setShowLog(false);
     setAuto(false);
     setSkip(false);
-    setOpeningPreludeVisible(false);
-    setCgClosing(false);
-    setCgMediaKind("image");
-    setCgVideoUrl("");
-    cgSeenRef.current = "";
+    resetPresentationState();
     stopBgm();
     const match = bgmList.find((item) => item.label === lastSave.bgmName || item.label.includes(lastSave.bgmName || ""));
     if (match) {
@@ -875,38 +795,6 @@ export function useVnRuntime() {
     },
     [pulseUi],
   );
-
-  const closeCg = useCallback((advance = false) => {
-    if (!cgVisible) return;
-    cgSeenRef.current = `${index}:${curLine?.cg || ""}`;
-    setCgClosing(true);
-    pulseUi("cg");
-    if (cgCloseTimerRef.current) window.clearTimeout(cgCloseTimerRef.current);
-    cgCloseTimerRef.current = window.setTimeout(() => {
-      if (cgVideoUrlRef.current) {
-        URL.revokeObjectURL(cgVideoUrlRef.current);
-        cgVideoUrlRef.current = "";
-      }
-      setCgVisible(false);
-      setCgClosing(false);
-      setCgMediaKind("image");
-      setCgVideoUrl("");
-      if (advance && phase === "playing") {
-        setIndex((value) => Math.min(SCRIPT.lines.length, value + 1));
-      }
-      cgCloseTimerRef.current = null;
-    }, 240);
-  }, [cgVisible, curLine?.cg, index, phase, pulseUi]);
-
-  const triggerOpeningPrelude = useCallback((text: string) => {
-    if (preludeTimerRef.current) window.clearTimeout(preludeTimerRef.current);
-    setOpeningPreludeText(text);
-    setOpeningPreludeVisible(true);
-    preludeTimerRef.current = window.setTimeout(() => {
-      setOpeningPreludeVisible(false);
-      preludeTimerRef.current = null;
-    }, 1500);
-  }, []);
 
   const handleNext = useCallback(() => {
     if (phase !== "playing" || !curLine) return;
@@ -942,7 +830,6 @@ export function useVnRuntime() {
     setAuto(false);
     setSkip(false);
     setTyping(false);
-    cgSeenRef.current = "";
     if (index <= 0) return;
     let nextIndex = index - 1;
     while (nextIndex > 0) {
@@ -957,7 +844,6 @@ export function useVnRuntime() {
   }, [index, phase]);
 
   const handleChoice = useCallback((cmd: string) => {
-    cgSeenRef.current = "";
     if (cmd.startsWith("@jump")) {
       const label = cmd.replace("@jump", "").trim();
       const target = SCRIPT.labelMap.get(label);
@@ -990,11 +876,7 @@ export function useVnRuntime() {
     setLog([]);
     clearLastBackground();
     setActivePanel(null);
-    setCgVisible(false);
-    setCgClosing(false);
-    setCgMediaKind("image");
-    setCgVideoUrl("");
-    cgSeenRef.current = "";
+    resetPresentationState();
     setOpeningPreludeVisible(true);
     stopBgm();
     window.setTimeout(() => {
@@ -1177,9 +1059,6 @@ export function useVnRuntime() {
   useEffect(() => {
     return () => {
       if (codeTxtUrlRef.current) URL.revokeObjectURL(codeTxtUrlRef.current);
-      if (cgVideoUrlRef.current) URL.revokeObjectURL(cgVideoUrlRef.current);
-      if (cgCloseTimerRef.current) window.clearTimeout(cgCloseTimerRef.current);
-      if (preludeTimerRef.current) window.clearTimeout(preludeTimerRef.current);
     };
   }, []);
 
