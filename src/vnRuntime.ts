@@ -85,7 +85,8 @@ type ExportSourceFile = {
 };
 
 type UseCodeExportRuntimeArgs = {
-  files: ExportSourceFile[];
+  enabled: boolean;
+  loadFiles: () => Promise<ExportSourceFile[]>;
 };
 
 type UseLibraryRuntimeArgs = {
@@ -317,11 +318,14 @@ export function useStageEffectsRuntime({
   };
 }
 
-export function useCodeExportRuntime({ files }: UseCodeExportRuntimeArgs) {
+export function useCodeExportRuntime({ enabled, loadFiles }: UseCodeExportRuntimeArgs) {
   const [codeTxtUrl, setCodeTxtUrl] = useState("");
   const codeTxtUrlRef = useRef("");
 
-  const exportAllCodeTxt = useCallback(() => {
+  const exportAllCodeTxt = useCallback(async () => {
+    if (!enabled) return;
+    const files = await loadFiles();
+    if (!files.length) return;
     const header = [
       "VN Studio - 完整源码导出",
       `导出时间: ${new Date().toLocaleString()}`,
@@ -361,7 +365,7 @@ export function useCodeExportRuntime({ files }: UseCodeExportRuntimeArgs) {
     document.body.appendChild(anchor);
     anchor.click();
     anchor.remove();
-  }, [files]);
+  }, [enabled, loadFiles]);
 
   useEffect(() => {
     return () => {
@@ -370,6 +374,7 @@ export function useCodeExportRuntime({ files }: UseCodeExportRuntimeArgs) {
   }, []);
 
   return {
+    canExportCode: enabled,
     codeTxtUrl,
     exportAllCodeTxt,
   };
@@ -711,6 +716,11 @@ export function useSaveRuntime({
 }: UseSaveRuntimeArgs) {
   const [saveSlots, setSaveSlots] = useState<Array<SaveSlot | null>>(() => readSaveSlots(SAVE_SLOT_COUNT));
   const [hasContinueSave, setHasContinueSave] = useState(() => Boolean(safeParseJson<SaveSlot | null>(localStorage.getItem(STORAGE_KEYS.save), null)));
+  const restoreSessionRef = useRef(onRestoreSession);
+
+  useEffect(() => {
+    restoreSessionRef.current = onRestoreSession;
+  }, [onRestoreSession]);
 
   const commitSaveSlot = useCallback(
     (slotIndex: number) => {
@@ -745,7 +755,7 @@ export function useSaveRuntime({
 
   const restoreSave = useCallback(
     async (slot: SaveSlot) => {
-      onRestoreSession({
+      restoreSessionRef.current({
         index: Math.min(SCRIPT.lines.length - 1, slot.index),
         log: slot.log || [],
         act: slot.act || "",
@@ -759,7 +769,7 @@ export function useSaveRuntime({
       }
       pulseUi("scene");
     },
-    [bgmList, onLoadBgmById, onResetPresentationState, onRestoreSession, onStopBgm, pulseUi],
+    [bgmList, onLoadBgmById, onResetPresentationState, onStopBgm, pulseUi],
   );
 
   const loadSaveSlot = useCallback(
@@ -1606,6 +1616,20 @@ export function useAudioRuntime({ settings, bgmList }: UseAudioRuntimeArgs) {
   const bgmUrlRef = useRef("");
   const sfxUrlRef = useRef("");
   const uiPulseRef = useRef<number | null>(null);
+  const fadeInTimerRef = useRef<number | null>(null);
+  const fadeOutTimerRef = useRef<number | null>(null);
+  const retiringBgmUrlRef = useRef("");
+
+  const clearFadeTimers = useCallback(() => {
+    if (fadeInTimerRef.current) window.clearInterval(fadeInTimerRef.current);
+    if (fadeOutTimerRef.current) window.clearInterval(fadeOutTimerRef.current);
+    fadeInTimerRef.current = null;
+    fadeOutTimerRef.current = null;
+    if (retiringBgmUrlRef.current) {
+      URL.revokeObjectURL(retiringBgmUrlRef.current);
+      retiringBgmUrlRef.current = "";
+    }
+  }, []);
 
   useEffect(() => {
     bgmRef.current.loop = true;
@@ -1620,10 +1644,10 @@ export function useAudioRuntime({ settings, bgmList }: UseAudioRuntimeArgs) {
   }, [settings.bgmVol, settings.sfxVol]);
 
   const pulseUi = useCallback((_layer = "ui") => {
-      if (uiPulseRef.current) window.clearTimeout(uiPulseRef.current);
-      uiPulseRef.current = window.setTimeout(() => {
-        uiPulseRef.current = null;
-      }, 120);
+    if (uiPulseRef.current) window.clearTimeout(uiPulseRef.current);
+    uiPulseRef.current = window.setTimeout(() => {
+      uiPulseRef.current = null;
+    }, 120);
   }, []);
 
   const crossfadeBgm = useCallback(
@@ -1632,41 +1656,57 @@ export function useAudioRuntime({ settings, bgmList }: UseAudioRuntimeArgs) {
       try {
         const blob = await AssetDB.get<Blob>(AssetDB.STORE_ASSETS, assetId);
         if (!blob) return;
+        clearFadeTimers();
 
-        if (bgmRef.current.src && bgmPlaying) {
-          const oldAudio = bgmRef.current;
-          const fadeOut = window.setInterval(() => {
+        const oldAudio = bgmRef.current;
+        const nextAudio = bgmFadeRef.current;
+        const oldUrl = bgmUrlRef.current;
+        nextAudio.pause();
+        nextAudio.removeAttribute("src");
+
+        if (oldAudio.src && bgmPlaying) {
+          retiringBgmUrlRef.current = oldUrl;
+          fadeOutTimerRef.current = window.setInterval(() => {
             if (oldAudio.volume > 0.05) {
               oldAudio.volume = Math.max(0, oldAudio.volume - 0.05);
             } else {
               oldAudio.pause();
-              window.clearInterval(fadeOut);
+              oldAudio.removeAttribute("src");
+              if (retiringBgmUrlRef.current) {
+                URL.revokeObjectURL(retiringBgmUrlRef.current);
+                retiringBgmUrlRef.current = "";
+              }
+              if (fadeOutTimerRef.current) window.clearInterval(fadeOutTimerRef.current);
+              fadeOutTimerRef.current = null;
             }
           }, 50);
+        } else {
+          oldAudio.pause();
+          oldAudio.removeAttribute("src");
+          if (oldUrl) URL.revokeObjectURL(oldUrl);
         }
 
-        if (bgmUrlRef.current) URL.revokeObjectURL(bgmUrlRef.current);
         const url = URL.createObjectURL(blob);
         bgmUrlRef.current = url;
 
-        bgmFadeRef.current.src = url;
-        bgmFadeRef.current.volume = 0;
-        bgmFadeRef.current.muted = bgmMuted;
-        await bgmFadeRef.current.play().catch(() => undefined);
+        nextAudio.src = url;
+        nextAudio.volume = 0;
+        nextAudio.muted = bgmMuted;
+        await nextAudio.play().catch(() => undefined);
 
         const targetVol = settings.bgmVol / 100;
-        const fadeIn = window.setInterval(() => {
-          if (bgmFadeRef.current.volume < targetVol - 0.05) {
-            bgmFadeRef.current.volume = Math.min(targetVol, bgmFadeRef.current.volume + 0.05);
+        fadeInTimerRef.current = window.setInterval(() => {
+          if (nextAudio.volume < targetVol - 0.05) {
+            nextAudio.volume = Math.min(targetVol, nextAudio.volume + 0.05);
           } else {
-            bgmFadeRef.current.volume = targetVol;
-            window.clearInterval(fadeIn);
+            nextAudio.volume = targetVol;
+            if (fadeInTimerRef.current) window.clearInterval(fadeInTimerRef.current);
+            fadeInTimerRef.current = null;
           }
         }, 50);
 
-        const temp = bgmRef.current;
-        bgmRef.current = bgmFadeRef.current;
-        bgmFadeRef.current = temp;
+        bgmRef.current = nextAudio;
+        bgmFadeRef.current = oldAudio;
         setBgmPlaying(true);
         setCurrentBgmId(assetId);
         setCurrentBgmName(name);
@@ -1674,21 +1714,25 @@ export function useAudioRuntime({ settings, bgmList }: UseAudioRuntimeArgs) {
         // ignore autoplay and blob issues
       }
     },
-    [bgmMuted, bgmPlaying, settings.bgmVol],
+    [bgmMuted, bgmPlaying, clearFadeTimers, settings.bgmVol],
   );
 
   const stopBgm = useCallback(() => {
+    clearFadeTimers();
     bgmRef.current.pause();
     bgmRef.current.currentTime = 0;
+    bgmFadeRef.current.pause();
+    bgmFadeRef.current.currentTime = 0;
     if (bgmUrlRef.current) {
       URL.revokeObjectURL(bgmUrlRef.current);
       bgmUrlRef.current = "";
     }
     bgmRef.current.removeAttribute("src");
+    bgmFadeRef.current.removeAttribute("src");
     setBgmPlaying(false);
     setCurrentBgmId("");
     setCurrentBgmName("");
-  }, []);
+  }, [clearFadeTimers]);
 
   const loadAndPlayBgm = useCallback(
     async (assetId: string) => {
@@ -1699,6 +1743,9 @@ export function useAudioRuntime({ settings, bgmList }: UseAudioRuntimeArgs) {
       try {
         const blob = await AssetDB.get<Blob>(AssetDB.STORE_ASSETS, assetId);
         if (!blob) return;
+        clearFadeTimers();
+        bgmFadeRef.current.pause();
+        bgmFadeRef.current.removeAttribute("src");
         if (bgmUrlRef.current) URL.revokeObjectURL(bgmUrlRef.current);
         const url = URL.createObjectURL(blob);
         bgmUrlRef.current = url;
@@ -1714,7 +1761,7 @@ export function useAudioRuntime({ settings, bgmList }: UseAudioRuntimeArgs) {
         // ignore
       }
     },
-    [bgmList, bgmMuted, settings.bgmVol, stopBgm],
+    [bgmList, bgmMuted, clearFadeTimers, settings.bgmVol, stopBgm],
   );
 
   const playSfx = useCallback(
@@ -1766,8 +1813,12 @@ export function useAudioRuntime({ settings, bgmList }: UseAudioRuntimeArgs) {
       if (bgmUrlRef.current) URL.revokeObjectURL(bgmUrlRef.current);
       if (sfxUrlRef.current) URL.revokeObjectURL(sfxUrlRef.current);
       if (uiPulseRef.current) window.clearTimeout(uiPulseRef.current);
+      clearFadeTimers();
+      bgmRef.current.pause();
+      bgmFadeRef.current.pause();
+      sfxRef.current.pause();
     };
-  }, []);
+  }, [clearFadeTimers]);
 
   return {
     bgmPlaying,

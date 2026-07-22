@@ -17,7 +17,6 @@ import {
 } from "./vnCore";
 import { CORNER_IMG_URL, CREDITS_BLOCKS, QA_ITEMS, TITLE_SCREEN_BG } from "./vnContent";
 import { AssetsPanel, SettingsPanel } from "./vnPanels";
-import { buildExportSourceFiles } from "./vnSourceBundle";
 import { RainCanvas, StageSprites } from "./vnVisuals";
 import {
   useAudioRuntime,
@@ -97,11 +96,16 @@ export function useVnRuntime() {
     setSceneQuery,
   } = useWorkspaceRuntime();
   const isEditorMode = workspaceMode === "editor";
+  const closeActivePanel = useCallback(() => setActivePanel(null), [setActivePanel]);
+  const advanceLine = useCallback(
+    () => setIndex((value) => Math.min(SCRIPT.lines.length, value + 1)),
+    [],
+  );
   const { lowPerfMode } = useShellRuntime({
     settings,
     isEditorMode,
     activePanel,
-    onCloseRestrictedPanel: () => setActivePanel(null),
+    onCloseRestrictedPanel: closeActivePanel,
   });
   const {
     manifestState,
@@ -206,7 +210,7 @@ export function useVnRuntime() {
     resolveSceneBackground,
     lowPerfMode,
     pulseUi,
-    onAdvance: () => setIndex((value) => Math.min(SCRIPT.lines.length, value + 1)),
+    onAdvance: advanceLine,
   });
   const buildSnapshot = useCallback(
     () => buildSaveSnapshot(index, log, currentAct, currentBgmName, curLine, SCRIPT.lines.length),
@@ -239,6 +243,25 @@ export function useVnRuntime() {
     onResetPresentationState: resetPresentationState,
     pulseUi,
   });
+  const handleBacktrack = useCallback((nextIndex: number) => setIndex(nextIndex), []);
+  const handleJump = useCallback((nextIndex: number) => setIndex(nextIndex), []);
+  const handleEnterCredits = useCallback(() => setPhase("credits"), []);
+  const handleAppendLog = useCallback(
+    (item: LogItem) => setLog((previous) => [...previous, item].slice(-100)),
+    [],
+  );
+  const handleQuickSave = useCallback(
+    () => saveGame(selectedSaveSlot, false),
+    [saveGame, selectedSaveSlot],
+  );
+  const handleToggleLog = useCallback(
+    () => setShowLog((value) => !value),
+    [setShowLog],
+  );
+  const handleCloseOverlays = useCallback(() => {
+    setActivePanel(null);
+    setShowLog(false);
+  }, [setActivePanel, setShowLog]);
   const {
     typing,
     displayedText,
@@ -263,20 +286,37 @@ export function useVnRuntime() {
     settings,
     closeCg,
     pulseUi,
-    onAdvance: () => setIndex((value) => Math.min(SCRIPT.lines.length, value + 1)),
-    onBacktrack: (nextIndex) => setIndex(nextIndex),
-    onJump: (nextIndex) => setIndex(nextIndex),
-    onEnterCredits: () => setPhase("credits"),
-    onAppendLog: (item) => setLog((prev) => [...prev, item].slice(-100)),
-    onQuickSave: () => saveGame(selectedSaveSlot, false),
-    onToggleLog: () => setShowLog((value) => !value),
-    onCloseOverlays: () => {
-      setActivePanel(null);
-      setShowLog(false);
-    },
+    onAdvance: advanceLine,
+    onBacktrack: handleBacktrack,
+    onJump: handleJump,
+    onEnterCredits: handleEnterCredits,
+    onAppendLog: handleAppendLog,
+    onQuickSave: handleQuickSave,
+    onToggleLog: handleToggleLog,
+    onCloseOverlays: handleCloseOverlays,
   });
-  const exportFiles = useMemo(() => buildExportSourceFiles(), []);
-  const { codeTxtUrl, exportAllCodeTxt } = useCodeExportRuntime({ files: exportFiles });
+  const loadExportFiles = useCallback(async () => {
+    if (!import.meta.env.DEV) return [];
+    const { buildExportSourceFiles } = await import("./vnSourceBundle");
+    return buildExportSourceFiles();
+  }, []);
+  const { canExportCode, codeTxtUrl, exportAllCodeTxt } = useCodeExportRuntime({
+    enabled: import.meta.env.DEV && isEditorMode,
+    loadFiles: loadExportFiles,
+  });
+  const handleSetFlowPhase = useCallback((nextPhase: string) => {
+    setPhase(nextPhase as GamePhase);
+  }, []);
+  const handleClearLog = useCallback(() => setLog([]), []);
+  const handleClosePanels = useCallback(() => {
+    setActivePanel(null);
+    setShowLog(false);
+    setShowQaPanel(false);
+    setOpenQaIndex(null);
+  }, [setActivePanel, setOpenQaIndex, setShowLog, setShowQaPanel]);
+  const handleToggleWorkspaceMode = useCallback(() => {
+    setWorkspaceMode((value) => (value === "editor" ? "player" : "editor"));
+  }, [setWorkspaceMode]);
 
   const {
     titleReady,
@@ -292,16 +332,11 @@ export function useVnRuntime() {
     activePanel,
     showQaPanel,
     pulseUi,
-    onSetPhase: (nextPhase) => setPhase(nextPhase as GamePhase),
+    onSetPhase: handleSetFlowPhase,
     onSetIndex: setIndex,
-    onClearLog: () => setLog([]),
+    onClearLog: handleClearLog,
     onClearLastBackground: clearLastBackground,
-    onClosePanels: () => {
-      setActivePanel(null);
-      setShowLog(false);
-      setShowQaPanel(false);
-      setOpenQaIndex(null);
-    },
+    onClosePanels: handleClosePanels,
     onResetPresentationState: resetPresentationState,
     onStopBgm: stopBgm,
     onSetScreenFlashVisible: setScreenFlashVisible,
@@ -309,7 +344,7 @@ export function useVnRuntime() {
     onTriggerOpeningPrelude: triggerOpeningPrelude,
     onSetOpeningPreludeVisible: setOpeningPreludeVisible,
     onSetHudAwake: setHudAwake,
-    onToggleWorkspaceMode: () => setWorkspaceMode((value) => (value === "editor" ? "player" : "editor")),
+    onToggleWorkspaceMode: handleToggleWorkspaceMode,
     onSetShowQaPanel: setShowQaPanel,
     onSetOpenQaIndex: setOpenQaIndex,
     onSetActivePanel: setActivePanel,
@@ -470,6 +505,76 @@ export function useVnRuntime() {
     setResourcePage(0);
   }, [assetFilter, assetQuery]);
 
+  const handleToggleAuto = useCallback(() => {
+    setAuto((value) => !value);
+    setSkip(false);
+  }, [setAuto, setSkip]);
+  const handleToggleSkip = useCallback(() => {
+    setSkip((value) => !value);
+    setAuto(false);
+  }, [setAuto, setSkip]);
+  const handleOpenLog = useCallback(() => setShowLog(true), [setShowLog]);
+  const handleCloseLog = useCallback(() => setShowLog(false), [setShowLog]);
+  const handleReturnTitle = useCallback(() => {
+    returnToTitle();
+    setAuto(false);
+    setSkip(false);
+  }, [returnToTitle, setAuto, setSkip]);
+  const handleExportCode = useCallback(() => {
+    void exportAllCodeTxt();
+  }, [exportAllCodeTxt]);
+  const handleResetSettings = useCallback(() => setSettings(DEFAULT_SETTINGS), []);
+  const handleSaveCurrentSlot = useCallback(
+    () => saveGame(selectedSaveSlot, true),
+    [saveGame, selectedSaveSlot],
+  );
+  const handleUpdateContinue = useCallback(
+    () => saveGame(selectedSaveSlot, false),
+    [saveGame, selectedSaveSlot],
+  );
+  const handleSaveSlot = useCallback((slotIndex: number) => saveGame(slotIndex, true), [saveGame]);
+  const handleJumpStart = useCallback(() => {
+    setIndex(0);
+    setPhase("playing");
+    setActivePanel(null);
+    pulseUi("scene");
+  }, [pulseUi, setActivePanel]);
+  const handleJumpRandom = useCallback(() => {
+    const jump = debugMarkers[Math.floor(Math.random() * Math.max(1, debugMarkers.length))];
+    if (!jump) return;
+    setIndex(jump.idx);
+    setPhase("playing");
+    pulseUi("scene");
+  }, [debugMarkers, pulseUi]);
+  const handleTriggerCg = useCallback(() => {
+    if (!curLine) return;
+    setCgImageUrl(bgUrl || DEFAULT_BG);
+    setCgVisible(true);
+    pulseUi("cg");
+  }, [bgUrl, curLine, pulseUi, setCgImageUrl, setCgVisible]);
+  const handleSwitchBg = useCallback(() => {
+    const nextBg = bgUrl === TITLE_SCREEN_BG ? resolveSceneBackground(curLine?.scene) : TITLE_SCREEN_BG;
+    showImmediateBackground(nextBg);
+    pulseUi("scene");
+  }, [bgUrl, curLine?.scene, pulseUi, resolveSceneBackground, showImmediateBackground]);
+  const handleSwitchEmotion = useCallback(() => {
+    setDebugExpressionOverride((value) => (value === "panic" ? "calm" : "panic"));
+    pulseUi("emotion");
+  }, [pulseUi]);
+  const handleFlashWhite = useCallback(() => {
+    triggerEffect("flash-white");
+    pulseUi("ui");
+  }, [pulseUi, triggerEffect]);
+  const handleGoToMarker = useCallback((markerIndex: number) => {
+    setIndex(markerIndex);
+    setPhase("playing");
+    setActivePanel(null);
+    pulseUi("scene");
+  }, [pulseUi, setActivePanel]);
+  const handleLoadAndPlayBgm = useCallback((id: string) => {
+    void loadAndPlayBgm(id);
+  }, [loadAndPlayBgm]);
+
   return (
     <div id="app-root" className={lowPerfMode ? "low-perf" : ""}>
       {phase === "warning" && <WarningScene onContinue={() => setPhase("title")} />}
@@ -587,26 +692,17 @@ export function useVnRuntime() {
             bgmPlaying={bgmPlaying}
             bgmMuted={bgmMuted}
             isEditorMode={isEditorMode}
+            canExportCode={canExportCode}
             codeTxtUrl={codeTxtUrl}
             onPrev={handlePrev}
             onNext={handleNext}
-            onToggleAuto={() => {
-              setAuto(!auto);
-              setSkip(false);
-            }}
-            onToggleSkip={() => {
-              setSkip(!skip);
-              setAuto(false);
-            }}
-            onOpenLog={() => setShowLog(true)}
+            onToggleAuto={handleToggleAuto}
+            onToggleSkip={handleToggleSkip}
+            onOpenLog={handleOpenLog}
             onTogglePanel={togglePanel}
             onToggleWorkspaceMode={toggleWorkspaceMode}
-            onReturnTitle={() => {
-              returnToTitle();
-              setAuto(false);
-              setSkip(false);
-            }}
-            onExportCode={exportAllCodeTxt}
+            onReturnTitle={handleReturnTitle}
+            onExportCode={handleExportCode}
           />
 
           <PlayingPanelsView
@@ -618,59 +714,27 @@ export function useVnRuntime() {
             currentBgmName={currentBgmName}
             currentEffect={curLine?.effect}
             onSettingsChange={setSettings}
-            onSettingsReset={() => setSettings(DEFAULT_SETTINGS)}
+            onSettingsReset={handleResetSettings}
             assetsPanelProps={assetsPanelProps}
             selectedSaveSlot={selectedSaveSlot}
             onSelectedSaveSlotChange={setSelectedSaveSlot}
-            onSaveCurrentSlot={() => saveGame(selectedSaveSlot, true)}
-            onUpdateContinue={() => saveGame(selectedSaveSlot, false)}
+            onSaveCurrentSlot={handleSaveCurrentSlot}
+            onUpdateContinue={handleUpdateContinue}
             saveSlots={saveSlots}
             getSavePreview={getSavePreview}
             onSelectSlot={setSelectedSaveSlot}
-            onSaveSlot={(slotIndex) => saveGame(slotIndex, true)}
+            onSaveSlot={handleSaveSlot}
             onLoadSlot={loadSaveSlot}
             onDeleteSlot={deleteSaveSlot}
             getSavedAtLabel={getSavedAtLabel}
             debugMarkers={debugMarkers}
-            onJumpStart={() => {
-              setIndex(0);
-              setPhase("playing");
-              setActivePanel(null);
-              pulseUi("scene");
-            }}
-            onJumpRandom={() => {
-              const jump = debugMarkers[Math.floor(Math.random() * Math.max(1, debugMarkers.length))];
-              if (jump) {
-                setIndex(jump.idx);
-                setPhase("playing");
-                pulseUi("scene");
-              }
-            }}
-            onTriggerCg={() => {
-              if (!curLine) return;
-              setCgImageUrl(bgUrl || DEFAULT_BG);
-              setCgVisible(true);
-              pulseUi("cg");
-            }}
-            onSwitchBg={() => {
-              const nextBg = bgUrl === TITLE_SCREEN_BG ? resolveSceneBackground(curLine?.scene) : TITLE_SCREEN_BG;
-              showImmediateBackground(nextBg);
-              pulseUi("scene");
-            }}
-            onSwitchEmotion={() => {
-              setDebugExpressionOverride((value) => (value === "panic" ? "calm" : "panic"));
-              pulseUi("emotion");
-            }}
-            onFlashWhite={() => {
-              triggerEffect("flash-white");
-              pulseUi("ui");
-            }}
-            onGoToMarker={(idx) => {
-              setIndex(idx);
-              setPhase("playing");
-              setActivePanel(null);
-              pulseUi("scene");
-            }}
+            onJumpStart={handleJumpStart}
+            onJumpRandom={handleJumpRandom}
+            onTriggerCg={handleTriggerCg}
+            onSwitchBg={handleSwitchBg}
+            onSwitchEmotion={handleSwitchEmotion}
+            onFlashWhite={handleFlashWhite}
+            onGoToMarker={handleGoToMarker}
             debugPage={debugPage}
             debugPageCount={debugPageCount}
             debugCount={debugMarkers.length}
@@ -683,7 +747,7 @@ export function useVnRuntime() {
             onToggleBgm={toggleBgm}
             onStopBgm={stopBgm}
             onToggleMute={toggleMute}
-            onLoadAndPlayBgm={(id) => void loadAndPlayBgm(id)}
+            onLoadAndPlayBgm={handleLoadAndPlayBgm}
           />
 
           <DialogueHudView
@@ -705,7 +769,7 @@ export function useVnRuntime() {
             onChoice={handleChoice}
           />
 
-          <BacklogView visible={showLog} log={log} onClose={() => setShowLog(false)} />
+          <BacklogView visible={showLog} log={log} onClose={handleCloseLog} />
         </PlayingScene>
       )}
 

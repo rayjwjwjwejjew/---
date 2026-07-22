@@ -1,4 +1,4 @@
-import type { ComponentProps, ReactNode } from "react";
+import { memo, type ComponentProps, type ReactNode } from "react";
 import type { ChoiceTone } from "./vnDerived";
 import type { SaveSlot, Settings } from "./vnCore";
 import { AssetsPanel, BgmPanel, DebugPanel, SavePanel, SettingsPanel } from "./vnPanels";
@@ -438,6 +438,7 @@ type PlaybackControlBarProps = {
   bgmPlaying: boolean;
   bgmMuted: boolean;
   isEditorMode: boolean;
+  canExportCode: boolean;
   codeTxtUrl: string;
   onPrev: () => void;
   onNext: () => void;
@@ -450,7 +451,7 @@ type PlaybackControlBarProps = {
   onExportCode: () => void;
 };
 
-export function PlaybackControlBar({
+export const PlaybackControlBar = memo(function PlaybackControlBar({
   hudAwake,
   activePanel,
   showLog,
@@ -459,6 +460,7 @@ export function PlaybackControlBar({
   bgmPlaying,
   bgmMuted,
   isEditorMode,
+  canExportCode,
   codeTxtUrl,
   onPrev,
   onNext,
@@ -490,15 +492,15 @@ export function PlaybackControlBar({
         {isEditorMode ? "玩家模式" : "编辑器"}
       </button>
       <button className="pbtn" onClick={onReturnTitle}>标题</button>
-      <button className="pbtn" onClick={onExportCode}>代码</button>
-      {codeTxtUrl && (
+      {canExportCode && <button className="pbtn" onClick={onExportCode}>代码</button>}
+      {canExportCode && codeTxtUrl && (
         <a className="pbtn" href={codeTxtUrl} download="VN_全部代码.txt" style={{ textDecoration: "none" }}>
           ⬇TXT
         </a>
       )}
     </div>
   );
-}
+});
 
 type ChoiceOption = {
   text: string;
@@ -600,7 +602,7 @@ type BacklogViewProps = {
   onClose: () => void;
 };
 
-export function BacklogView({ visible, log, onClose }: BacklogViewProps) {
+export const BacklogView = memo(function BacklogView({ visible, log, onClose }: BacklogViewProps) {
   return (
     <div id="backlog" className={visible ? "show" : ""}>
       <div className="wrap">
@@ -622,7 +624,7 @@ export function BacklogView({ visible, log, onClose }: BacklogViewProps) {
       </div>
     </div>
   );
-}
+});
 
 type PresentationOverlaysProps = {
   screenFlashVisible: boolean;
@@ -631,7 +633,7 @@ type PresentationOverlaysProps = {
   playingPhase: boolean;
 };
 
-export function PresentationOverlays({
+export const PresentationOverlays = memo(function PresentationOverlays({
   screenFlashVisible,
   openingPreludeVisible,
   openingPreludeText,
@@ -655,7 +657,7 @@ export function PresentationOverlays({
       )}
     </>
   );
-}
+});
 
 type DebugMarker = {
   line: { kind: string; text?: string; name?: string; speaker?: string };
@@ -707,7 +709,7 @@ type PlayingPanelsViewProps = {
   onLoadAndPlayBgm: (id: string) => void;
 };
 
-export function PlayingPanelsView({
+export const PlayingPanelsView = memo(function PlayingPanelsView({
   activePanel,
   isEditorMode,
   settings,
@@ -842,4 +844,4 @@ export function PlayingPanelsView({
       )}
     </>
   );
-}
+});

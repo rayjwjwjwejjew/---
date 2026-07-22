@@ -10,8 +10,10 @@ export const CREDITS_BLOCKS = [
   { role: "剧情测试", names: "Ray、Justin" },
 ];
 
-export const TITLE_SCREEN_BG = "https://i.imgur.com/FAWl3AP.png";
-export const CORNER_IMG_URL = "https://i.imgur.com/NVGVJiU.png";
+const PUBLIC_UI_BASE = `${import.meta.env.BASE_URL}ui/`;
+
+export const TITLE_SCREEN_BG = `${PUBLIC_UI_BASE}title-background.webp`;
+export const CORNER_IMG_URL = `${PUBLIC_UI_BASE}qa-corner.webp`;
 
 export const QA_ITEMS = [
   { q: "1、为什么做这个？", a: "m成分占比太高" },

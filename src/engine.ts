@@ -220,7 +220,7 @@ function rainySchoolScene() {
 
 function dormScene(night = false) {
   if (!night) {
-    return "https://i.imgur.com/pR8zjdc.png";
+    return `${import.meta.env.BASE_URL}scene-bg/dorm-common.png`;
   }
   return createSceneSvg(`
     <rect width="1600" height="900" fill="${night ? "#111929" : "#f4f1e7"}"/>
@@ -792,35 +792,37 @@ export const SCENE_BG: Record<string, string> = {
   meetingRoom: LOCAL_BG.teacherRoom,
 };
 
+const PUBLIC_CHARACTER_BASE = `${import.meta.env.BASE_URL}characters/`;
+
 export const CHARACTER_SPRITES: Record<string, string> = {
-  锐: "https://i.imgur.com/RMYcBeX.png",
-  蒋: "https://i.imgur.com/xRBHPZu.png",
-  俞: "https://i.imgur.com/BioDQB4.jpeg",
-  小猫: "https://i.imgur.com/BioDQB4.jpeg",
-  图书管理员老师: "https://i.imgur.com/tdPI7mK.jpeg",
-  何老师: "https://i.imgur.com/U8WN9Kb.jpeg",
-  老师A: "https://i.imgur.com/82XmTrj.jpeg",
-  老师B: "https://i.imgur.com/xE3e54W.jpeg",
-  教导处老师: "https://i.imgur.com/vEcaTQf.jpeg",
-  旁边老师: "https://i.imgur.com/6hbyRf9.jpeg",
-  孙学长: "https://i.imgur.com/rZeZN6Z.jpeg",
-  "？？学长": "https://i.imgur.com/rZeZN6Z.jpeg",
-  学长: "https://i.imgur.com/rZeZN6Z.jpeg",
-  "？？？": "https://i.imgur.com/BioDQB4.jpeg",
-  植物人学长的妈妈: "https://i.imgur.com/yNpNszf.gif",
-  马佳宁: "https://i.imgur.com/tdPI7mK.jpeg",
-  调查员甲: "https://i.imgur.com/vEcaTQf.jpeg",
-  调查员乙: "https://i.imgur.com/6hbyRf9.jpeg",
-  校领导: "https://i.imgur.com/vEcaTQf.jpeg",
-  金仕涵: "https://i.imgur.com/SStY5m6.jpeg",
-  体育组组长: "https://i.imgur.com/82XmTrj.jpeg",
-  年级组长: "https://i.imgur.com/82XmTrj.jpeg",
-  女警员: "https://i.imgur.com/tdPI7mK.jpeg",
+  锐: `${PUBLIC_CHARACTER_BASE}rui-calm.webp`,
+  蒋: `${PUBLIC_CHARACTER_BASE}jiang.webp`,
+  俞: `${PUBLIC_CHARACTER_BASE}yu.webp`,
+  小猫: `${PUBLIC_CHARACTER_BASE}yu.webp`,
+  图书管理员老师: `${PUBLIC_CHARACTER_BASE}librarian.webp`,
+  何老师: `${PUBLIC_CHARACTER_BASE}teacher-he.webp`,
+  老师A: `${PUBLIC_CHARACTER_BASE}teacher-a.webp`,
+  老师B: `${PUBLIC_CHARACTER_BASE}teacher-b.webp`,
+  教导处老师: `${PUBLIC_CHARACTER_BASE}discipline-teacher.webp`,
+  旁边老师: `${PUBLIC_CHARACTER_BASE}teacher-side.webp`,
+  孙学长: `${PUBLIC_CHARACTER_BASE}senior-sun.webp`,
+  "？？学长": `${PUBLIC_CHARACTER_BASE}senior-sun.webp`,
+  学长: `${PUBLIC_CHARACTER_BASE}senior-sun.webp`,
+  "？？？": `${PUBLIC_CHARACTER_BASE}yu.webp`,
+  植物人学长的妈妈: `${PUBLIC_CHARACTER_BASE}senior-mother.gif`,
+  马佳宁: `${PUBLIC_CHARACTER_BASE}librarian.webp`,
+  调查员甲: `${PUBLIC_CHARACTER_BASE}discipline-teacher.webp`,
+  调查员乙: `${PUBLIC_CHARACTER_BASE}teacher-side.webp`,
+  校领导: `${PUBLIC_CHARACTER_BASE}discipline-teacher.webp`,
+  金仕涵: `${PUBLIC_CHARACTER_BASE}jin-shihan.webp`,
+  体育组组长: `${PUBLIC_CHARACTER_BASE}teacher-a.webp`,
+  年级组长: `${PUBLIC_CHARACTER_BASE}teacher-a.webp`,
+  女警员: `${PUBLIC_CHARACTER_BASE}librarian.webp`,
 };
 
 const CHARACTER_VARIANTS: Partial<Record<keyof typeof CHARACTER_SPRITES, Partial<Record<CharacterExpression, string>>>> = {
   锐: {
-    hesitant: "https://i.imgur.com/uK2YPCJ.png",
+    hesitant: `${PUBLIC_CHARACTER_BASE}rui-hesitant.webp`,
   },
 };
 
