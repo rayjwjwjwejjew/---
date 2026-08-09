@@ -1,6 +1,6 @@
 import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AssetDB } from "./db";
-import { DEFAULT_BG, SCRIPT, getSceneBg, getSceneCharacters, getSpecialBg } from "./engine";
+import { DEFAULT_BG, SCRIPT, getCgImage, getSceneCharacters, getScenePresentation } from "./engine";
 import type { StageCharacter } from "./engine";
 import { ensureImageReady, queueImagePreload } from "./vnMedia";
 import { CORNER_IMG_URL, TITLE_SCREEN_BG } from "./vnContent";
@@ -844,6 +844,7 @@ export function usePlaybackRuntime({
   const [hudAwake, setHudAwake] = useState(false);
 
   const autoTimeoutRef = useRef<number | null>(null);
+  const autosaveTimeoutRef = useRef<number | null>(null);
   const typingFrameRef = useRef<number | null>(null);
   const typingDelayRef = useRef<number | null>(null);
   const hudSleepRef = useRef<number | null>(null);
@@ -1040,9 +1041,14 @@ export function usePlaybackRuntime({
   }, [activePanel, cgVisible, phase, showLog, showQaPanel, wakeHud]);
 
   useEffect(() => {
-    if (phase === "playing" && index > 0) {
-      onQuickSave();
-    }
+    if (autosaveTimeoutRef.current) window.clearTimeout(autosaveTimeoutRef.current);
+    if (phase !== "playing" || index <= 0) return;
+
+    // Local storage writes can hitch auto/skip playback, so save after the reader pauses.
+    autosaveTimeoutRef.current = window.setTimeout(onQuickSave, 700);
+    return () => {
+      if (autosaveTimeoutRef.current) window.clearTimeout(autosaveTimeoutRef.current);
+    };
   }, [index, onQuickSave, phase]);
 
   useEffect(() => {
@@ -1051,6 +1057,7 @@ export function usePlaybackRuntime({
       if (typingDelayRef.current) window.clearTimeout(typingDelayRef.current);
       if (typingFrameRef.current) cancelAnimationFrame(typingFrameRef.current);
       if (hudSleepRef.current) window.clearTimeout(hudSleepRef.current);
+      if (autosaveTimeoutRef.current) window.clearTimeout(autosaveTimeoutRef.current);
     };
   }, []);
 
@@ -1220,7 +1227,7 @@ export function useBackgroundRuntime({
       if (override?.source === "asset" && bgAssetUrlCacheRef.current[override.value]) {
         return bgAssetUrlCacheRef.current[override.value];
       }
-      return getSceneBg(scene) || DEFAULT_BG;
+      return getScenePresentation(scene).background || DEFAULT_BG;
     },
     [sceneBgOverrides],
   );
@@ -1270,7 +1277,7 @@ export function useBackgroundRuntime({
         }
         return;
       }
-      const builtIn = getSceneBg(scene) || DEFAULT_BG;
+      const builtIn = getScenePresentation(scene).background || DEFAULT_BG;
       setBgUrl(builtIn);
       lastBgRef.current = builtIn;
       pulseUi("scene");
@@ -1323,11 +1330,7 @@ export function useBackgroundRuntime({
 
   useEffect(() => {
     if (phase !== "playing" || !line) return;
-    let nextBg = resolveSceneBackground(line.scene);
-    const special = getSpecialBg(index);
-    if (special) {
-      nextBg = special;
-    }
+    const nextBg = resolveSceneBackground(line.scene);
 
     const override = line.scene ? sceneBgOverrides[line.scene] : undefined;
     const loadAssetBg = async () => {
@@ -1460,7 +1463,7 @@ export function usePresentationRuntime({
     const cgKey = `${index}:${line.cg}`;
     if (cgSeenRef.current === cgKey) return;
     let cancelled = false;
-    const posterUrl = resolveSceneBackground(line.scene) || bgUrl || DEFAULT_BG;
+    const posterUrl = getCgImage(line.cg, line.scene) || resolveSceneBackground(line.scene) || bgUrl || DEFAULT_BG;
     pulseUi("cg");
 
     const openCgWithPoster = () => {
