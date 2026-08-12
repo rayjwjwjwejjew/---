@@ -1,6 +1,7 @@
-import { memo, type ComponentProps, type ReactNode } from "react";
+import { memo, useSyncExternalStore, type ComponentProps, type ReactNode } from "react";
 import type { ChoiceTone } from "./vnDerived";
 import type { SaveSlot, Settings } from "./vnCore";
+import type { PlaybackTextStore } from "./vnPlaybackText";
 import { AssetsPanel, BgmPanel, DebugPanel, SavePanel, SettingsPanel } from "./vnPanels";
 import { DustCanvas } from "./vnVisuals";
 
@@ -517,7 +518,7 @@ type DialogueHudViewProps = {
   speaker: string | undefined;
   speakerColor: string;
   textVisible: boolean;
-  displayedText: string;
+  textStore: PlaybackTextStore;
   sceneProgress: string;
   options?: ChoiceOption[];
   getChoiceTone: (text: string) => ChoiceTone;
@@ -526,7 +527,7 @@ type DialogueHudViewProps = {
   onChoice: (cmd: string) => void;
 };
 
-export function DialogueHudView({
+export const DialogueHudView = memo(function DialogueHudView({
   visible,
   canAdvance,
   isChoiceMode,
@@ -536,7 +537,7 @@ export function DialogueHudView({
   speaker,
   speakerColor,
   textVisible,
-  displayedText,
+  textStore,
   sceneProgress,
   options,
   getChoiceTone,
@@ -544,6 +545,8 @@ export function DialogueHudView({
   onNext,
   onChoice,
 }: DialogueHudViewProps) {
+  const displayedText = useSyncExternalStore(textStore.subscribe, textStore.getSnapshot, textStore.getSnapshot);
+
   return (
     <div id="hud" style={{ display: visible ? "block" : "none" }}>
       <div
@@ -594,7 +597,7 @@ export function DialogueHudView({
       </div>
     </div>
   );
-}
+});
 
 type BacklogViewProps = {
   visible: boolean;

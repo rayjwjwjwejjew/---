@@ -3,6 +3,7 @@ import { AssetDB } from "./db";
 import { DEFAULT_BG, SCRIPT, getCgImage, getSceneCharacters, getScenePresentation } from "./engine";
 import type { StageCharacter } from "./engine";
 import { ensureImageReady, queueImagePreload } from "./vnMedia";
+import { createPlaybackTextRuntime } from "./vnPlaybackText";
 import { CORNER_IMG_URL, TITLE_SCREEN_BG } from "./vnContent";
 import { findBestAssetMatch, getBgmMoodClass, getCurrentBgmLabel } from "./vnDerived";
 import {
@@ -149,35 +150,6 @@ function safeParseJson<T>(raw: string | null, fallback: T): T {
   }
 }
 
-const PAUSE_CHARS: Record<string, number> = {
-  "。": 6,
-  "！": 5,
-  "？": 5,
-  "…": 4,
-  "，": 2,
-  "、": 2,
-  "；": 3,
-  "：": 3,
-  ".": 4,
-  "!": 4,
-  "?": 4,
-  ",": 2,
-};
-
-const SMART_PAUSE_WORDS = ["……", "顿了顿", "沉默", "低声", "轻声", "迟疑", "犹豫", "停了一下", "想了想"];
-const EMOTION_WORDS = ["惊", "怕", "慌", "痛", "哭", "怒", "冷", "颤", "喘", "哽", "失控", "崩溃", "压抑", "紧张"];
-
-function getLineTypingDelay(text: string, index: number, baseMs: number) {
-  const char = text[index - 1] || "";
-  let delay = baseMs * (PAUSE_CHARS[char] || 1);
-  if (delay === baseMs) {
-    const windowText = text.slice(Math.max(0, index - 4), index + 4);
-    if (SMART_PAUSE_WORDS.some((word) => windowText.includes(word))) delay *= 1.8;
-    if (EMOTION_WORDS.some((word) => windowText.includes(word))) delay *= 1.35;
-  }
-  return Math.max(12, Math.round(delay));
-}
-
 function buildEffectClasses(effectActive: string, sceneBlur: boolean) {
   return [
     effectActive === "shake" ? "fx-shake" : "",
@@ -231,7 +203,13 @@ export function useShellRuntime({
     root.setProperty("--sprite-x", `${settings.spriteX}px`);
     root.setProperty("--ui-alpha", `${0.05 + settings.uiAlpha / 420}`);
     root.setProperty("--title-bg-url", `url("${TITLE_SCREEN_BG}")`);
-    localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify(settings));
+  }, [settings]);
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => {
+      localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify(settings));
+    }, 180);
+    return () => window.clearTimeout(timer);
   }, [settings]);
 
   useEffect(() => {
@@ -837,7 +815,6 @@ export function usePlaybackRuntime({
   onCloseOverlays,
 }: UsePlaybackRuntimeArgs) {
   const [typing, setTyping] = useState(false);
-  const [displayedText, setDisplayedText] = useState("");
   const [auto, setAuto] = useState(false);
   const [skip, setSkip] = useState(false);
   const [textVisible, setTextVisible] = useState(true);
@@ -845,9 +822,9 @@ export function usePlaybackRuntime({
 
   const autoTimeoutRef = useRef<number | null>(null);
   const autosaveTimeoutRef = useRef<number | null>(null);
-  const typingFrameRef = useRef<number | null>(null);
-  const typingDelayRef = useRef<number | null>(null);
   const hudSleepRef = useRef<number | null>(null);
+  const textRuntimeRef = useRef(createPlaybackTextRuntime());
+  const textRuntime = textRuntimeRef.current;
 
   const wakeHud = useCallback(() => {
     setHudAwake(true);
@@ -872,50 +849,19 @@ export function usePlaybackRuntime({
     if (line.kind !== "choice") {
       pulseUi(line.effect && line.effect !== "none" ? "emotion" : "story");
     }
-    if (typingFrameRef.current) cancelAnimationFrame(typingFrameRef.current);
-    if (typingDelayRef.current) window.clearTimeout(typingDelayRef.current);
-    typingDelayRef.current = window.setTimeout(() => {
-      setDisplayedText("");
-      setTyping(true);
-      setTextVisible(true);
-      let nextText = line.text || "";
-      if (line.kind === "choice") nextText = "请选择：";
-      if (skip || settings.typeMs === 0) {
-        setDisplayedText(nextText);
-        setTyping(false);
-        return;
-      }
-
-      let ci = 0;
-      let lastTime = performance.now();
-      let frameId = 0;
-      const frame = (now: number) => {
-        const effectiveDelay = getLineTypingDelay(nextText, ci, settings.typeMs);
-        const delta = now - lastTime;
-        if (delta >= effectiveDelay) {
-          const previousChar = nextText[ci - 1] || "";
-          const step = PAUSE_CHARS[previousChar] ? 1 : Math.max(1, Math.floor(delta / Math.max(1, settings.typeMs)));
-          ci = Math.min(nextText.length, ci + step);
-          setDisplayedText(nextText.slice(0, ci));
-          lastTime = now;
-        }
-        if (ci < nextText.length) {
-          frameId = requestAnimationFrame(frame);
-          typingFrameRef.current = frameId;
-        } else {
-          setTyping(false);
-          typingFrameRef.current = null;
-        }
-      };
-      frameId = requestAnimationFrame(frame);
-      typingFrameRef.current = frameId;
-    }, 120);
+    textRuntime.play({
+      text: line.kind === "choice" ? "请选择：" : line.text || "",
+      typeMs: settings.typeMs,
+      instant: skip,
+      onStart: () => setTyping(true),
+      onReveal: () => setTextVisible(true),
+      onComplete: () => setTyping(false),
+    });
 
     return () => {
-      if (typingDelayRef.current) window.clearTimeout(typingDelayRef.current);
-      if (typingFrameRef.current) cancelAnimationFrame(typingFrameRef.current);
+      textRuntime.cancel();
     };
-  }, [index, line, onEnterCredits, onJump, phase, pulseUi, settings.typeMs, skip]);
+  }, [index, line, onEnterCredits, onJump, phase, pulseUi, settings.typeMs, skip, textRuntime]);
 
   const handleNext = useCallback(() => {
     if (phase !== "playing" || !line) return;
@@ -923,15 +869,7 @@ export function usePlaybackRuntime({
       closeCg(true);
       return;
     }
-    if (typing) {
-      if (typingFrameRef.current) {
-        cancelAnimationFrame(typingFrameRef.current);
-        typingFrameRef.current = null;
-      }
-      setDisplayedText(line.kind === "choice" ? "请选择：" : line.text || "");
-      setTyping(false);
-      return;
-    }
+    if (textRuntime.complete()) return;
     if (line.kind === "choice") return;
     if (line.kind === "label") {
       onAdvance();
@@ -944,12 +882,13 @@ export function usePlaybackRuntime({
       pulseUi("cg");
     }
     onAdvance();
-  }, [cgVisible, closeCg, line, onAdvance, onAppendLog, phase, pulseUi, typing]);
+  }, [cgVisible, closeCg, line, onAdvance, onAppendLog, phase, pulseUi, textRuntime]);
 
   const handlePrev = useCallback(() => {
     if (phase !== "playing") return;
     setAuto(false);
     setSkip(false);
+    textRuntime.cancel();
     setTyping(false);
     if (index <= 0) return;
     let nextIndex = index - 1;
@@ -962,7 +901,7 @@ export function usePlaybackRuntime({
       }
     }
     onBacktrack(nextIndex);
-  }, [index, onBacktrack, phase]);
+  }, [index, onBacktrack, phase, textRuntime]);
 
   const handleChoice = useCallback(
     (cmd: string) => {
@@ -1054,16 +993,15 @@ export function usePlaybackRuntime({
   useEffect(() => {
     return () => {
       if (autoTimeoutRef.current) window.clearTimeout(autoTimeoutRef.current);
-      if (typingDelayRef.current) window.clearTimeout(typingDelayRef.current);
-      if (typingFrameRef.current) cancelAnimationFrame(typingFrameRef.current);
+      textRuntime.cancel();
       if (hudSleepRef.current) window.clearTimeout(hudSleepRef.current);
       if (autosaveTimeoutRef.current) window.clearTimeout(autosaveTimeoutRef.current);
     };
-  }, []);
+  }, [textRuntime]);
 
   return {
     typing,
-    displayedText,
+    textStore: textRuntime,
     auto,
     skip,
     textVisible,

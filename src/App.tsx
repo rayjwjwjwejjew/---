@@ -264,7 +264,7 @@ export function useVnRuntime() {
   }, [setActivePanel, setShowLog]);
   const {
     typing,
-    displayedText,
+    textStore,
     auto,
     skip,
     textVisible,
@@ -705,50 +705,52 @@ export function useVnRuntime() {
             onExportCode={handleExportCode}
           />
 
-          <PlayingPanelsView
-            activePanel={activePanel}
-            isEditorMode={isEditorMode}
-            settings={settings}
-            currentIndex={index}
-            currentScene={curLine?.scene}
-            currentBgmName={currentBgmName}
-            currentEffect={curLine?.effect}
-            onSettingsChange={setSettings}
-            onSettingsReset={handleResetSettings}
-            assetsPanelProps={assetsPanelProps}
-            selectedSaveSlot={selectedSaveSlot}
-            onSelectedSaveSlotChange={setSelectedSaveSlot}
-            onSaveCurrentSlot={handleSaveCurrentSlot}
-            onUpdateContinue={handleUpdateContinue}
-            saveSlots={saveSlots}
-            getSavePreview={getSavePreview}
-            onSelectSlot={setSelectedSaveSlot}
-            onSaveSlot={handleSaveSlot}
-            onLoadSlot={loadSaveSlot}
-            onDeleteSlot={deleteSaveSlot}
-            getSavedAtLabel={getSavedAtLabel}
-            debugMarkers={debugMarkers}
-            onJumpStart={handleJumpStart}
-            onJumpRandom={handleJumpRandom}
-            onTriggerCg={handleTriggerCg}
-            onSwitchBg={handleSwitchBg}
-            onSwitchEmotion={handleSwitchEmotion}
-            onFlashWhite={handleFlashWhite}
-            onGoToMarker={handleGoToMarker}
-            debugPage={debugPage}
-            debugPageCount={debugPageCount}
-            debugCount={debugMarkers.length}
-            onDebugPageChange={setDebugPage}
-            bgmPlaying={bgmPlaying}
-            bgmMuted={bgmMuted}
-            currentBgmLabel={currentBgmLabel}
-            currentBgmId={currentBgmId}
-            bgmList={bgmList}
-            onToggleBgm={toggleBgm}
-            onStopBgm={stopBgm}
-            onToggleMute={toggleMute}
-            onLoadAndPlayBgm={handleLoadAndPlayBgm}
-          />
+          {activePanel && (
+            <PlayingPanelsView
+              activePanel={activePanel}
+              isEditorMode={isEditorMode}
+              settings={settings}
+              currentIndex={index}
+              currentScene={curLine?.scene}
+              currentBgmName={currentBgmName}
+              currentEffect={curLine?.effect}
+              onSettingsChange={setSettings}
+              onSettingsReset={handleResetSettings}
+              assetsPanelProps={assetsPanelProps}
+              selectedSaveSlot={selectedSaveSlot}
+              onSelectedSaveSlotChange={setSelectedSaveSlot}
+              onSaveCurrentSlot={handleSaveCurrentSlot}
+              onUpdateContinue={handleUpdateContinue}
+              saveSlots={saveSlots}
+              getSavePreview={getSavePreview}
+              onSelectSlot={setSelectedSaveSlot}
+              onSaveSlot={handleSaveSlot}
+              onLoadSlot={loadSaveSlot}
+              onDeleteSlot={deleteSaveSlot}
+              getSavedAtLabel={getSavedAtLabel}
+              debugMarkers={debugMarkers}
+              onJumpStart={handleJumpStart}
+              onJumpRandom={handleJumpRandom}
+              onTriggerCg={handleTriggerCg}
+              onSwitchBg={handleSwitchBg}
+              onSwitchEmotion={handleSwitchEmotion}
+              onFlashWhite={handleFlashWhite}
+              onGoToMarker={handleGoToMarker}
+              debugPage={debugPage}
+              debugPageCount={debugPageCount}
+              debugCount={debugMarkers.length}
+              onDebugPageChange={setDebugPage}
+              bgmPlaying={bgmPlaying}
+              bgmMuted={bgmMuted}
+              currentBgmLabel={currentBgmLabel}
+              currentBgmId={currentBgmId}
+              bgmList={bgmList}
+              onToggleBgm={toggleBgm}
+              onStopBgm={stopBgm}
+              onToggleMute={toggleMute}
+              onLoadAndPlayBgm={handleLoadAndPlayBgm}
+            />
+          )}
 
           <DialogueHudView
             visible={Boolean(curLine)}
@@ -760,7 +762,7 @@ export function useVnRuntime() {
             speaker={speaker}
             speakerColor={speakerColor}
             textVisible={textVisible}
-            displayedText={curLine?.kind === "choice" ? "请选择：" : displayedText}
+            textStore={textStore}
             sceneProgress={sceneProgress}
             options={curLine?.options}
             getChoiceTone={getChoiceTone}
@@ -769,7 +771,7 @@ export function useVnRuntime() {
             onChoice={handleChoice}
           />
 
-          <BacklogView visible={showLog} log={log} onClose={handleCloseLog} />
+          {showLog && <BacklogView visible log={log} onClose={handleCloseLog} />}
         </PlayingScene>
       )}
 

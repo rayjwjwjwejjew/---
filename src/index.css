@@ -848,7 +848,6 @@ textarea {
   background: #000 center / cover no-repeat;
   transform: scale(var(--bg-scale));
   opacity: var(--bg-opacity);
-  filter: saturate(1.04) contrast(1.02);
   will-change: transform, opacity;
 }
 
@@ -906,17 +905,14 @@ textarea {
   0% {
     opacity: 0;
     transform: scale(calc(var(--bg-scale) + 0.03)) translateY(8px);
-    filter: saturate(0.95) contrast(0.98) blur(2px);
   }
   40% {
     opacity: calc(var(--bg-opacity) * 0.92);
     transform: scale(calc(var(--bg-scale) + 0.015)) translateY(2px);
-    filter: saturate(1.02) contrast(1.01) blur(0);
   }
   100% {
     opacity: var(--bg-opacity);
     transform: scale(var(--bg-scale)) translateY(0);
-    filter: saturate(1.04) contrast(1.02);
   }
 }
 
@@ -924,17 +920,14 @@ textarea {
   0% {
     opacity: var(--bg-opacity);
     transform: scale(var(--bg-scale)) translateY(0);
-    filter: saturate(1.04) contrast(1.02);
   }
   35% {
     opacity: calc(var(--bg-opacity) * 0.82);
     transform: scale(calc(var(--bg-scale) * 1.015)) translateY(-2px);
-    filter: saturate(1.02) contrast(1.02) blur(0.5px);
   }
   100% {
     opacity: 0;
     transform: scale(calc(var(--bg-scale) * 1.03)) translateY(-8px);
-    filter: saturate(0.94) contrast(1) blur(2px);
   }
 }
 
@@ -1170,10 +1163,9 @@ textarea {
   transition:
     opacity 0.36s ease,
     transform 0.36s ease,
-    filter 0.36s ease,
     left 0.5s ease,
     right 0.5s ease;
-  will-change: opacity, transform, filter;
+  will-change: opacity, transform;
 }
 
 .sprite-multi.loading {
