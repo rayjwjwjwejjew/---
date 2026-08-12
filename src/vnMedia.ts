@@ -9,9 +9,12 @@ export function ensureImageReady(url: string): Promise<void> {
 
   const promise = new Promise<void>((resolve) => {
     const img = new Image();
+    let finished = false;
     img.decoding = "async";
     img.loading = "eager";
     const finish = () => {
+      if (finished) return;
+      finished = true;
       if (typeof img.decode === "function") {
         void img.decode().catch(() => undefined).finally(resolve);
         return;

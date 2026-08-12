@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import "./index.css";
 import {
   CHARACTER_COLORS,
@@ -9,14 +9,12 @@ import {
   DEFAULT_SETTINGS,
   buildSaveSnapshot,
   getSavedAtLabel,
-  readJson,
-  STORAGE_KEYS,
-  type Manifest,
+  readManifest,
+  readSettings,
   type SaveSlot,
   type Settings,
 } from "./vnCore";
 import { CORNER_IMG_URL, CREDITS_BLOCKS, QA_ITEMS, TITLE_SCREEN_BG } from "./vnContent";
-import { AssetsPanel, SettingsPanel } from "./vnPanels";
 import { RainCanvas, StageSprites } from "./vnVisuals";
 import {
   useAudioRuntime,
@@ -38,7 +36,6 @@ import {
   CreditsScene,
   DialogueHudView,
   PlaybackControlBar,
-  PlayingPanelsView,
   PlayingScene,
   PresentationOverlays,
   TitleQaPanel,
@@ -53,22 +50,37 @@ import {
   buildResourceEntries,
   filterResourceEntries,
   filterSceneNames,
-  getCgCaption,
   getChoiceTone,
   getChoiceToneLabel,
   getDialogueTone,
   getSceneProgress,
   isEmphasisLine,
 } from "./vnDerived";
+import { CG_ENTRIES, CHAPTERS, useStoryStateRuntime, restoreRollbackLog, type CgEntry, type ChapterEntry } from "./vnProgress";
+import type { RouteState } from "./vnState";
+import { useVoiceRuntime } from "./vnVoice";
 type GamePhase = "warning" | "title" | "playing" | "credits";
 type LogItem = { who: string; text: string };
+
+const ExtrasPanel = lazy(() => import("./vnExtras"));
+const PlayingPanelsView = lazy(() => import("./vnPlayingPanels"));
+const SettingsPanel = lazy(() => import("./vnPanels").then((module) => ({ default: module.SettingsPanel })));
+const AssetsPanel = lazy(() => import("./vnPanels").then((module) => ({ default: module.AssetsPanel })));
 
 const SCRIPT_SCENES = collectScriptScenes(SCRIPT.lines);
 
 export function useVnRuntime() {
   const [index, setIndex] = useState(0);
-  const [settings, setSettings] = useState<Settings>(() => readJson(STORAGE_KEYS.settings, DEFAULT_SETTINGS));
+  const [settings, setSettings] = useState<Settings>(readSettings);
   const [phase, setPhase] = useState<GamePhase>("warning");
+  const [replayMode, setReplayMode] = useState(false);
+  const [replayEndIndex, setReplayEndIndex] = useState(-1);
+  const replayReturnRef = useRef<{
+    index: number;
+    log: LogItem[];
+    bgmName: string;
+    routeState: RouteState;
+  } | null>(null);
   const [log, setLog] = useState<LogItem[]>([]);
   const [debugExpressionOverride, setDebugExpressionOverride] = useState<"calm" | "panic" | null>(null);
   const {
@@ -114,9 +126,9 @@ export function useVnRuntime() {
     uploadAsset,
     batchRenameResources,
   } = useLibraryRuntime({
-    initialManifest: readJson<Manifest>(STORAGE_KEYS.manifest, {}),
+    initialManifest: readManifest(),
   });
-  const particlesEnabled = settings.particlesEnabled && !lowPerfMode;
+  const particlesEnabled = settings.particlesEnabled && !lowPerfMode && !settings.reducedMotion;
 
   const curLine = SCRIPT.lines[index];
   const {
@@ -133,6 +145,7 @@ export function useVnRuntime() {
     crossfadeBgm,
     playSfx,
     pulseUi,
+    setVoiceDucking,
     setCurrentBgmName,
     setCurrentBgmId,
   } = useAudioRuntime({ settings, bgmList });
@@ -152,6 +165,15 @@ export function useVnRuntime() {
     crossfadeBgm,
     playSfx,
     setCurrentBgmName,
+  });
+  const storyState = useStoryStateRuntime({
+    index,
+    line: curLine,
+    logLength: log.length,
+    currentAct,
+    currentBgmName,
+    phase,
+    persistProgress: !replayMode,
   });
   const {
     bgUrl,
@@ -178,6 +200,8 @@ export function useVnRuntime() {
     line: curLine,
     phase,
     lowPerfMode,
+    transitionLevel: settings.transitionLevel,
+    reducedMotion: settings.reducedMotion,
     pulseUi,
   });
   const {
@@ -211,10 +235,22 @@ export function useVnRuntime() {
     lowPerfMode,
     pulseUi,
     onAdvance: advanceLine,
+    onCgShown: storyState.unlockCg,
+    onBeforeAdvance: storyState.pushRollback,
   });
+  const voiceRuntime = useVoiceRuntime({
+    line: curLine,
+    phase,
+    settings,
+    voiceList: manifestState.voice || [],
+    onVoiceActive: setVoiceDucking,
+  });
+  useEffect(() => {
+    if (cgVisible) voiceRuntime.stopVoice();
+  }, [cgVisible, voiceRuntime.stopVoice]);
   const buildSnapshot = useCallback(
-    () => buildSaveSnapshot(index, log, currentAct, currentBgmName, curLine, SCRIPT.lines.length),
-    [currentAct, currentBgmName, curLine, index, log],
+    () => buildSaveSnapshot(index, log, currentAct, currentBgmName, curLine, SCRIPT.lines.length, storyState.routeState),
+    [currentAct, currentBgmName, curLine, index, log, storyState.routeState],
   );
   const {
     saveSlots,
@@ -227,7 +263,9 @@ export function useVnRuntime() {
     buildSnapshot,
     bgmList,
     selectedSaveSlot,
-    onRestoreSession: ({ index: nextIndex, log: nextLog, bgmName }) => {
+    onRestoreSession: ({ index: nextIndex, log: nextLog, bgmName, routeState }) => {
+      replayReturnRef.current = null;
+      setReplayMode(false);
       setPhase("playing");
       setIndex(nextIndex);
       setLog(nextLog);
@@ -237,13 +275,26 @@ export function useVnRuntime() {
       setSkip(false);
       setCurrentBgmId("");
       setCurrentBgmName(bgmName);
+      storyState.restoreRouteState(routeState);
     },
     onStopBgm: stopBgm,
     onLoadBgmById: loadAndPlayBgm,
     onResetPresentationState: resetPresentationState,
     pulseUi,
   });
-  const handleBacktrack = useCallback((nextIndex: number) => setIndex(nextIndex), []);
+  const handleBacktrack = useCallback((nextIndex: number) => {
+    const snapshot = storyState.popRollback();
+    if (!snapshot) {
+      setIndex(nextIndex);
+      return;
+    }
+    setIndex(snapshot.index);
+    setLog((current) => restoreRollbackLog(current, snapshot));
+    setCurrentBgmName(snapshot.bgmName);
+    const bgm = bgmList.find((item) => item.label === snapshot.bgmName || item.label.includes(snapshot.bgmName));
+    if (bgm) void loadAndPlayBgm(bgm.id);
+    else if (!snapshot.bgmName) stopBgm();
+  }, [bgmList, loadAndPlayBgm, setCurrentBgmName, stopBgm, storyState.popRollback]);
   const handleJump = useCallback((nextIndex: number) => setIndex(nextIndex), []);
   const handleEnterCredits = useCallback(() => setPhase("credits"), []);
   const handleAppendLog = useCallback(
@@ -251,8 +302,8 @@ export function useVnRuntime() {
     [],
   );
   const handleQuickSave = useCallback(
-    () => saveGame(selectedSaveSlot, false),
-    [saveGame, selectedSaveSlot],
+    () => { if (!replayMode) saveGame(selectedSaveSlot, false); },
+    [replayMode, saveGame, selectedSaveSlot],
   );
   const handleToggleLog = useCallback(
     () => setShowLog((value) => !value),
@@ -264,7 +315,7 @@ export function useVnRuntime() {
   }, [setActivePanel, setShowLog]);
   const {
     typing,
-    displayedText,
+    textStore,
     auto,
     skip,
     textVisible,
@@ -291,6 +342,13 @@ export function useVnRuntime() {
     onJump: handleJump,
     onEnterCredits: handleEnterCredits,
     onAppendLog: handleAppendLog,
+    onBeforeAdvance: storyState.pushRollback,
+    onLineSeen: storyState.markSeen,
+    isLineSeen: storyState.isSeen,
+    onRunCommand: storyState.runCommand,
+    onRecordChoice: storyState.recordChoice,
+    voicePlaying: voiceRuntime.voicePlaying,
+    autosaveEnabled: !replayMode,
     onQuickSave: handleQuickSave,
     onToggleLog: handleToggleLog,
     onCloseOverlays: handleCloseOverlays,
@@ -362,10 +420,9 @@ export function useVnRuntime() {
   });
   const dialogueTone = getDialogueTone(curLine);
   const emphasisLine = isEmphasisLine(curLine?.text);
-  const cgCaption = getCgCaption(currentAct, curLine);
   const sceneProgress = useMemo(() => getSceneProgress(index, SCRIPT.lines.length), [index]);
   const titlePanelOpen = useMemo(
-    () => phase === "title" && (activePanel === "settings" || (isEditorMode && activePanel === "assets")),
+    () => phase === "title" && (activePanel === "settings" || activePanel === "extras" || (isEditorMode && activePanel === "assets")),
     [activePanel, isEditorMode, phase],
   );
   const resourceEntries = useMemo(
@@ -449,6 +506,11 @@ export function useVnRuntime() {
       onBatchRename: batchRenameResources,
       bgmCount: bgmList.length,
       sfxCount: sfxList.length,
+      voiceList: manifestState.voice || [],
+      currentLineId: curLine?.lineId || "",
+      currentLineLabel: curLine?.text ? `${curLine.speaker || "旁白"}：${curLine.text.slice(0, 30)}` : "",
+      boundVoiceId: curLine?.lineId ? voiceRuntime.bindings[curLine.lineId] || "" : "",
+      onBindVoice: voiceRuntime.bindVoice,
       resourceEntries,
       filteredResources,
       onCopyResourceName: handleCopyResourceName,
@@ -486,6 +548,10 @@ export function useVnRuntime() {
       setSelectedBackgroundAssetId,
       setSelectedSceneName,
       sfxList.length,
+      manifestState.voice,
+      curLine,
+      voiceRuntime.bindVoice,
+      voiceRuntime.bindings,
       uploadAsset,
     ],
   );
@@ -515,24 +581,90 @@ export function useVnRuntime() {
   }, [setAuto, setSkip]);
   const handleOpenLog = useCallback(() => setShowLog(true), [setShowLog]);
   const handleCloseLog = useCallback(() => setShowLog(false), [setShowLog]);
+  const restoreReplaySession = useCallback(() => {
+    const returnState = replayReturnRef.current;
+    replayReturnRef.current = null;
+    setReplayMode(false);
+    setReplayEndIndex(-1);
+    if (!returnState) {
+      storyState.clearSession();
+      return;
+    }
+    setIndex(returnState.index);
+    setLog(returnState.log);
+    setCurrentBgmName(returnState.bgmName);
+    storyState.restoreRouteState(returnState.routeState);
+  }, [setCurrentBgmName, storyState.clearSession, storyState.restoreRouteState]);
   const handleReturnTitle = useCallback(() => {
     returnToTitle();
+    if (replayMode) {
+      restoreReplaySession();
+      setActivePanel("extras");
+    }
     setAuto(false);
     setSkip(false);
-  }, [returnToTitle, setAuto, setSkip]);
+  }, [replayMode, restoreReplaySession, returnToTitle, setActivePanel, setAuto, setSkip]);
   const handleExportCode = useCallback(() => {
     void exportAllCodeTxt();
   }, [exportAllCodeTxt]);
   const handleResetSettings = useCallback(() => setSettings(DEFAULT_SETTINGS), []);
   const handleSaveCurrentSlot = useCallback(
-    () => saveGame(selectedSaveSlot, true),
-    [saveGame, selectedSaveSlot],
+    () => { if (!replayMode) saveGame(selectedSaveSlot, true); },
+    [replayMode, saveGame, selectedSaveSlot],
   );
   const handleUpdateContinue = useCallback(
-    () => saveGame(selectedSaveSlot, false),
-    [saveGame, selectedSaveSlot],
+    () => { if (!replayMode) saveGame(selectedSaveSlot, false); },
+    [replayMode, saveGame, selectedSaveSlot],
   );
-  const handleSaveSlot = useCallback((slotIndex: number) => saveGame(slotIndex, true), [saveGame]);
+  const handleSaveSlot = useCallback((slotIndex: number) => { if (!replayMode) saveGame(slotIndex, true); }, [replayMode, saveGame]);
+  const handleStartNewGame = useCallback(() => {
+    replayReturnRef.current = null;
+    setReplayMode(false);
+    setReplayEndIndex(-1);
+    storyState.clearSession();
+    startNewGame();
+  }, [startNewGame, storyState.clearSession]);
+  const rememberReplayReturn = useCallback(() => {
+    replayReturnRef.current = {
+      index,
+      log: structuredClone(log),
+      bgmName: currentBgmName,
+      routeState: structuredClone(storyState.routeState),
+    };
+  }, [currentBgmName, index, log, storyState.routeState]);
+  const handleStartChapter = useCallback((chapter: ChapterEntry) => {
+    rememberReplayReturn();
+    const chapterPosition = CHAPTERS.findIndex((item) => item.chapterId === chapter.chapterId);
+    const nextChapter = CHAPTERS[chapterPosition + 1];
+    setReplayMode(true);
+    setReplayEndIndex((nextChapter?.index ?? SCRIPT.lines.length) - 1);
+    storyState.clearSession(storyState.chapterCheckpoints[chapter.chapterId]);
+    setLog([]);
+    setIndex(chapter.index);
+    setPhase("playing");
+    setActivePanel(null);
+    resetPresentationState();
+    stopBgm();
+  }, [rememberReplayReturn, resetPresentationState, setActivePanel, stopBgm, storyState.chapterCheckpoints, storyState.clearSession]);
+  const handleOpenGalleryCg = useCallback((entry: CgEntry) => {
+    rememberReplayReturn();
+    setReplayMode(true);
+    setReplayEndIndex(entry.index);
+    storyState.clearSession();
+    setLog([]);
+    setIndex(entry.index);
+    setPhase("playing");
+    setActivePanel(null);
+    resetPresentationState();
+  }, [rememberReplayReturn, resetPresentationState, setActivePanel, storyState.clearSession]);
+
+  useEffect(() => {
+    if (!replayMode || replayEndIndex < 0 || index <= replayEndIndex) return;
+    setPhase("title");
+    setActivePanel("extras");
+    restoreReplaySession();
+    resetPresentationState();
+  }, [index, replayEndIndex, replayMode, resetPresentationState, restoreReplaySession, setActivePanel]);
   const handleJumpStart = useCallback(() => {
     setIndex(0);
     setPhase("playing");
@@ -576,7 +708,7 @@ export function useVnRuntime() {
   }, [loadAndPlayBgm]);
 
   return (
-    <div id="app-root" className={lowPerfMode ? "low-perf" : ""}>
+    <div id="app-root" className={[lowPerfMode ? "low-perf" : "", settings.highContrast ? "high-contrast" : "", settings.reducedMotion ? "reduced-motion" : "", settings.readableFont ? "readable-font" : ""].filter(Boolean).join(" ")}>
       {phase === "warning" && <WarningScene onContinue={() => setPhase("title")} />}
 
       {phase === "title" && (
@@ -588,9 +720,10 @@ export function useVnRuntime() {
             hasContinueSave={hasContinueSave}
             workspaceMode={workspaceMode}
             cornerImageUrl={CORNER_IMG_URL}
-            onStartNewGame={startNewGame}
+            onStartNewGame={handleStartNewGame}
             onContinueLastGame={continueLastGame}
             onOpenSettings={() => setActivePanel("settings")}
+            onOpenExtras={() => setActivePanel("extras")}
             onOpenAssets={() => setActivePanel("assets")}
             onToggleWorkspaceMode={toggleWorkspaceMode}
             onOpenQa={() => {
@@ -611,14 +744,27 @@ export function useVnRuntime() {
           />
 
           <TitleSystemPanel
-            title={activePanel === "settings" ? "设置" : "资源管理"}
+            title={activePanel === "settings" ? "设置" : activePanel === "extras" ? "鉴赏" : "资源管理"}
             visible={titlePanelOpen}
             onClose={() => setActivePanel(null)}
           >
             {activePanel === "settings" ? (
-              <SettingsPanel settings={settings} onChange={setSettings} onReset={() => setSettings(DEFAULT_SETTINGS)} />
+              <Suspense fallback={<div className="card">正在载入设置……</div>}><SettingsPanel settings={settings} onChange={setSettings} onReset={() => setSettings(DEFAULT_SETTINGS)} /></Suspense>
+            ) : activePanel === "extras" ? (
+              <Suspense fallback={<div className="card">正在整理回忆……</div>}>
+                <ExtrasPanel
+                  chapters={CHAPTERS}
+                  cgs={CG_ENTRIES}
+                  unlockedChapterIds={Array.from(storyState.unlockedChapterIds)}
+                  unlockedCgIds={Array.from(storyState.unlockedCgIds)}
+                  choices={storyState.routeState.choices}
+                  editorMode={isEditorMode}
+                  onStartChapter={handleStartChapter}
+                  onOpenCg={handleOpenGalleryCg}
+                />
+              </Suspense>
             ) : (
-              <AssetsPanel {...assetsPanelProps} />
+              <Suspense fallback={<div className="card">正在载入资源库……</div>}><AssetsPanel {...assetsPanelProps} /></Suspense>
             )}
           </TitleSystemPanel>
         </TitleScene>
@@ -673,12 +819,6 @@ export function useVnRuntime() {
                 ) : (
                   <div className="cg-screen cg-art" style={{ backgroundImage: `url("${cgImageUrl}")` }} />
                 )}
-                {cgCaption && (
-                  <div className={`cg-caption ${cgMediaKind === "video" ? "video" : "image"}`}>
-                    <div className="cg-caption-label">{cgCaption.label}</div>
-                    <div className="cg-caption-copy">{cgCaption.copy}</div>
-                  </div>
-                )}
               </div>
             </div>
           )}
@@ -705,50 +845,52 @@ export function useVnRuntime() {
             onExportCode={handleExportCode}
           />
 
-          <PlayingPanelsView
-            activePanel={activePanel}
-            isEditorMode={isEditorMode}
-            settings={settings}
-            currentIndex={index}
-            currentScene={curLine?.scene}
-            currentBgmName={currentBgmName}
-            currentEffect={curLine?.effect}
-            onSettingsChange={setSettings}
-            onSettingsReset={handleResetSettings}
-            assetsPanelProps={assetsPanelProps}
-            selectedSaveSlot={selectedSaveSlot}
-            onSelectedSaveSlotChange={setSelectedSaveSlot}
-            onSaveCurrentSlot={handleSaveCurrentSlot}
-            onUpdateContinue={handleUpdateContinue}
-            saveSlots={saveSlots}
-            getSavePreview={getSavePreview}
-            onSelectSlot={setSelectedSaveSlot}
-            onSaveSlot={handleSaveSlot}
-            onLoadSlot={loadSaveSlot}
-            onDeleteSlot={deleteSaveSlot}
-            getSavedAtLabel={getSavedAtLabel}
-            debugMarkers={debugMarkers}
-            onJumpStart={handleJumpStart}
-            onJumpRandom={handleJumpRandom}
-            onTriggerCg={handleTriggerCg}
-            onSwitchBg={handleSwitchBg}
-            onSwitchEmotion={handleSwitchEmotion}
-            onFlashWhite={handleFlashWhite}
-            onGoToMarker={handleGoToMarker}
-            debugPage={debugPage}
-            debugPageCount={debugPageCount}
-            debugCount={debugMarkers.length}
-            onDebugPageChange={setDebugPage}
-            bgmPlaying={bgmPlaying}
-            bgmMuted={bgmMuted}
-            currentBgmLabel={currentBgmLabel}
-            currentBgmId={currentBgmId}
-            bgmList={bgmList}
-            onToggleBgm={toggleBgm}
-            onStopBgm={stopBgm}
-            onToggleMute={toggleMute}
-            onLoadAndPlayBgm={handleLoadAndPlayBgm}
-          />
+          {activePanel && (
+            <Suspense fallback={<div className="panel show"><div className="card">正在载入面板……</div></div>}><PlayingPanelsView
+              activePanel={activePanel}
+              isEditorMode={isEditorMode}
+              settings={settings}
+              currentIndex={index}
+              currentScene={curLine?.scene}
+              currentBgmName={currentBgmName}
+              currentEffect={curLine?.effect}
+              onSettingsChange={setSettings}
+              onSettingsReset={handleResetSettings}
+              assetsPanelProps={assetsPanelProps}
+              selectedSaveSlot={selectedSaveSlot}
+              onSelectedSaveSlotChange={setSelectedSaveSlot}
+              onSaveCurrentSlot={handleSaveCurrentSlot}
+              onUpdateContinue={handleUpdateContinue}
+              saveSlots={saveSlots}
+              getSavePreview={getSavePreview}
+              onSelectSlot={setSelectedSaveSlot}
+              onSaveSlot={handleSaveSlot}
+              onLoadSlot={loadSaveSlot}
+              onDeleteSlot={deleteSaveSlot}
+              getSavedAtLabel={getSavedAtLabel}
+              debugMarkers={debugMarkers}
+              onJumpStart={handleJumpStart}
+              onJumpRandom={handleJumpRandom}
+              onTriggerCg={handleTriggerCg}
+              onSwitchBg={handleSwitchBg}
+              onSwitchEmotion={handleSwitchEmotion}
+              onFlashWhite={handleFlashWhite}
+              onGoToMarker={handleGoToMarker}
+              debugPage={debugPage}
+              debugPageCount={debugPageCount}
+              debugCount={debugMarkers.length}
+              onDebugPageChange={setDebugPage}
+              bgmPlaying={bgmPlaying}
+              bgmMuted={bgmMuted}
+              currentBgmLabel={currentBgmLabel}
+              currentBgmId={currentBgmId}
+              bgmList={bgmList}
+              onToggleBgm={toggleBgm}
+              onStopBgm={stopBgm}
+              onToggleMute={toggleMute}
+              onLoadAndPlayBgm={handleLoadAndPlayBgm}
+            /></Suspense>
+          )}
 
           <DialogueHudView
             visible={Boolean(curLine)}
@@ -760,7 +902,7 @@ export function useVnRuntime() {
             speaker={speaker}
             speakerColor={speakerColor}
             textVisible={textVisible}
-            displayedText={curLine?.kind === "choice" ? "请选择：" : displayedText}
+            textStore={textStore}
             sceneProgress={sceneProgress}
             options={curLine?.options}
             getChoiceTone={getChoiceTone}
@@ -769,7 +911,7 @@ export function useVnRuntime() {
             onChoice={handleChoice}
           />
 
-          <BacklogView visible={showLog} log={log} onClose={handleCloseLog} />
+          {showLog && <BacklogView visible log={log} choices={storyState.routeState.choices} onClose={handleCloseLog} />}
         </PlayingScene>
       )}
 

@@ -50,5 +50,25 @@ export const AssetDB = (() => {
     });
   }
 
-  return { put, get, clear, STORE_ASSETS, STORE_META };
+  async function entries<T>(store: string): Promise<Array<{ key: string; value: T }>> {
+    const db = await open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(store, "readonly");
+      const objectStore = tx.objectStore(store);
+      const request = objectStore.openCursor();
+      const result: Array<{ key: string; value: T }> = [];
+      request.onsuccess = () => {
+        const cursor = request.result;
+        if (!cursor) {
+          resolve(result);
+          return;
+        }
+        result.push({ key: String(cursor.key), value: cursor.value as T });
+        cursor.continue();
+      };
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  return { put, get, clear, entries, STORE_ASSETS, STORE_META };
 })();

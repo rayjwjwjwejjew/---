@@ -1,4 +1,7 @@
-import type { AssetEntry, Manifest, SaveSlot, Settings } from "./vnCore";
+import { useEffect, useRef, useState } from "react";
+import { readManifest, type AssetEntry, type Manifest, type SaveSlot, type Settings } from "./vnCore";
+import { installPwa } from "./pwa";
+import { AssetDB } from "./db";
 
 export type ResourceEntry = { kind: keyof Manifest | "all"; id: string; label: string };
 
@@ -9,7 +12,7 @@ type SettingsPanelProps = {
 };
 
 type AssetsPanelProps = {
-  onUploadAsset: (kind: "bg" | "sprite" | "video" | "bgm" | "sfx") => void;
+  onUploadAsset: (kind: "bg" | "sprite" | "video" | "bgm" | "sfx" | "voice") => void;
   sceneQuery: string;
   onSceneQueryChange: (value: string) => void;
   selectedSceneName: string;
@@ -32,6 +35,11 @@ type AssetsPanelProps = {
   onBatchRename: () => void;
   bgmCount: number;
   sfxCount: number;
+  voiceList: AssetEntry[];
+  currentLineId: string;
+  currentLineLabel: string;
+  boundVoiceId: string;
+  onBindVoice: (lineId: string, assetId: string) => void;
   resourceEntries: ResourceEntry[];
   filteredResources: ResourceEntry[];
   onCopyResourceName: (value: string) => void;
@@ -86,12 +94,95 @@ type DebugPanelProps = {
 };
 
 export function SettingsPanel({ settings, onChange, onReset }: SettingsPanelProps) {
+  const [dataMessage, setDataMessage] = useState("数据工具尚未运行。");
+  const [offlineProgress, setOfflineProgress] = useState(0);
+  const [offlineDownloading, setOfflineDownloading] = useState(false);
+  const offlineAbortRef = useRef<AbortController | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    void import("./vnOffline").then(({ getOfflinePackStatus }) => getOfflinePackStatus()).then((status) => {
+      if (active) setDataMessage(status.supported ? `离线素材：${status.cached}/${status.total}` : "当前浏览器不支持离线缓存");
+    });
+    return () => {
+      active = false;
+      offlineAbortRef.current?.abort();
+    };
+  }, []);
+
+  const chooseBackup = () => {
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json,.zip,application/json,application/zip";
+    input.onchange = () => {
+      const file = input.files?.[0];
+      if (!file) return;
+      void import("./vnBackup").then(async ({ importBackup, inspectBackup }) => {
+        const summary = await inspectBackup(file);
+        const savedSlots = summary.envelope.saveSlots.filter(Boolean).length;
+        const confirmed = window.confirm(`备份时间：${new Date(summary.envelope.exportedAt).toLocaleString()}\n存档槽：${savedSlots}\n本地素材：${summary.assetCount}\n永久解锁会合并，设置与存档会恢复。继续吗？`);
+        if (!confirmed) return;
+        const result = await importBackup(file);
+        setDataMessage(`导入完成：${result.assets} 个素材。页面将刷新。`);
+        window.setTimeout(() => window.location.reload(), 500);
+      }).catch((error: unknown) => setDataMessage(error instanceof Error ? error.message : "导入失败"));
+    };
+    input.click();
+  };
+
   return (
     <div className="card">
       <div className="row">
         <span className="label">文字速度</span>
         <input type="range" min="0" max="60" value={settings.typeMs} onChange={(e) => onChange((s) => ({ ...s, typeMs: Number(e.target.value) }))} />
         <span className="tiny mono">{settings.typeMs}ms</span>
+      </div>
+      <div className="row">
+        <span className="label">文字大小</span>
+        <input type="range" min="85" max="140" value={settings.textScale} onChange={(e) => onChange((s) => ({ ...s, textScale: Number(e.target.value) }))} />
+        <span className="tiny mono">{settings.textScale}%</span>
+      </div>
+      <div className="row">
+        <span className="label">正文行距</span>
+        <input type="range" min="140" max="220" value={settings.lineHeight} onChange={(e) => onChange((s) => ({ ...s, lineHeight: Number(e.target.value) }))} />
+        <span className="tiny mono">{settings.lineHeight}%</span>
+      </div>
+      <div className="row">
+        <span className="label">跳过保护</span>
+        <button className="btn" onClick={() => {
+          if (!settings.skipUnseen) {
+            const confirmed = window.confirm("跳过未读文本可能错过新剧情，仍要开启吗？");
+            if (confirmed) onChange((s) => ({ ...s, skipUnseen: true, skipUnseenConfirmed: true }));
+          } else {
+            onChange((s) => ({ ...s, skipUnseen: false }));
+          }
+        }}>{settings.skipUnseen ? "允许跳过未读" : "仅跳过已读"}</button>
+        <span className="tiny">遇到未读、选项、CG 或章节页会自动停止。</span>
+      </div>
+      <div className="row">
+        <span className="label">阅读辅助</span>
+        <button className="btn" aria-pressed={settings.highContrast} onClick={() => onChange((s) => ({ ...s, highContrast: !s.highContrast }))}>高对比 {settings.highContrast ? "开" : "关"}</button>
+        <button className="btn" aria-pressed={settings.readableFont} onClick={() => onChange((s) => ({ ...s, readableFont: !s.readableFont }))}>易读字体 {settings.readableFont ? "开" : "关"}</button>
+        <button className="btn" aria-pressed={settings.reducedMotion} onClick={() => onChange((s) => ({ ...s, reducedMotion: !s.reducedMotion }))}>减少动态 {settings.reducedMotion ? "开" : "关"}</button>
+      </div>
+      <div className="row">
+        <span className="label">转场等级</span>
+        <select value={settings.transitionLevel} onChange={(e) => onChange((s) => ({ ...s, transitionLevel: e.target.value as Settings["transitionLevel"] }))}>
+          <option value="all">全部转场</option>
+          <option value="key">仅关键场景</option>
+          <option value="off">全部关闭</option>
+        </select>
+      </div>
+      <div className="row">
+        <span className="label">角色语音</span>
+        <input type="range" min="0" max="100" value={settings.voiceVol} onChange={(e) => onChange((s) => ({ ...s, voiceVol: Number(e.target.value) }))} />
+        <span className="tiny mono">{settings.voiceVol}%</span>
+        <button className="btn" onClick={() => onChange((s) => ({ ...s, voiceMuted: !s.voiceMuted }))}>{settings.voiceMuted ? "已静音" : "有声"}</button>
+      </div>
+      <div className="row">
+        <span className="label">浏览器朗读</span>
+        <button className="btn" aria-pressed={settings.ttsEnabled} onClick={() => onChange((s) => ({ ...s, ttsEnabled: !s.ttsEnabled }))}>{settings.ttsEnabled ? "已开启" : "默认关闭"}</button>
+        <span className="tiny">仅在当前对白没有上传语音时启用。</span>
       </div>
       <div className="row">
         <span className="label">自动间隔</span>
@@ -136,6 +227,47 @@ export function SettingsPanel({ settings, onChange, onReset }: SettingsPanelProp
         </button>
         <span className="tiny">标题页只预览配置，开始游戏后仍可在左上角继续调整。</span>
       </div>
+      <div className="card data-tools-card">
+        <div className="panel-title">数据、检查与离线</div>
+        <div className="row">
+          <button className="btn" onClick={() => void import("./vnBackup").then(({ downloadJsonBackup }) => downloadJsonBackup())}>导出 JSON</button>
+          <button className="btn" onClick={() => {
+            setDataMessage("正在打包本地素材……");
+            void import("./vnBackup").then(({ downloadFullBackup }) => downloadFullBackup()).then(() => setDataMessage("完整 ZIP 已生成。"), (error: unknown) => setDataMessage(error instanceof Error ? error.message : "打包失败"));
+          }}>导出完整 ZIP</button>
+          <button className="btn" onClick={chooseBackup}>导入备份</button>
+          <button className="btn" onClick={() => {
+            setDataMessage("正在检查脚本与资源……");
+            void import("./vnValidation").then(({ validateVnProject }) => validateVnProject(readManifest())).then((issues) => {
+              const counts = { P0: 0, P1: 0, P2: 0 };
+              issues.forEach((issue) => { counts[issue.severity] += 1; });
+              setDataMessage(issues.length ? `检查完成：P0 ${counts.P0} / P1 ${counts.P1} / P2 ${counts.P2}。${issues.slice(0, 3).map((issue) => issue.message).join("；")}` : "检查完成：没有发现问题。");
+            });
+          }}>运行资源检查</button>
+        </div>
+        <div className="row">
+          <button className="btn" onClick={() => {
+            const controller = new AbortController();
+            offlineAbortRef.current = controller;
+            setOfflineDownloading(true);
+            setOfflineProgress(0);
+            setDataMessage("正在下载完整离线素材，预计约 48MB……");
+            void import("./vnOffline").then(({ downloadOfflinePack }) => downloadOfflinePack((done, total) => setOfflineProgress(Math.round(done / total * 100)), controller.signal)).then((status) => setDataMessage(`离线素材完成：${status.cached}/${status.total}`), (error: unknown) => setDataMessage(error instanceof Error ? error.message : "离线下载失败")).finally(() => {
+              offlineAbortRef.current = null;
+              setOfflineDownloading(false);
+            });
+          }}>下载完整离线包</button>
+          <button className="btn" disabled={!offlineDownloading} onClick={() => {
+            offlineAbortRef.current?.abort();
+            offlineAbortRef.current = null;
+            setOfflineDownloading(false);
+          }}>取消下载</button>
+          <button className="btn" onClick={() => void import("./vnOffline").then(({ removeOfflinePack }) => removeOfflinePack()).then((status) => { setOfflineProgress(0); setDataMessage(`离线素材已删除：${status.cached}/${status.total}`); })}>删除离线包</button>
+          <button className="btn" onClick={() => void installPwa().then((installed) => setDataMessage(installed ? "应用安装完成。" : "浏览器暂未提供安装入口，可使用浏览器菜单安装。"))}>安装应用</button>
+        </div>
+        {offlineProgress > 0 && offlineProgress < 100 && <progress max="100" value={offlineProgress}>{offlineProgress}%</progress>}
+        <div className="tiny" role="status">{dataMessage}</div>
+      </div>
     </div>
   );
 }
@@ -164,6 +296,11 @@ export function AssetsPanel({
   onBatchRename,
   bgmCount,
   sfxCount,
+  voiceList,
+  currentLineId,
+  currentLineLabel,
+  boundVoiceId,
+  onBindVoice,
   resourceEntries,
   filteredResources,
   onCopyResourceName,
@@ -183,9 +320,34 @@ export function AssetsPanel({
           <button className="btn" onClick={() => onUploadAsset("video")}>上传视频CG</button>
           <button className="btn" onClick={() => onUploadAsset("bgm")}>上传BGM</button>
           <button className="btn" onClick={() => onUploadAsset("sfx")}>上传音效</button>
+          <button className="btn" onClick={() => onUploadAsset("voice")}>上传角色语音</button>
         </div>
         <div className="tiny">资源会保存在浏览器本地（IndexedDB）。</div>
         <div className="tiny" style={{ marginTop: 6 }}>TXT 导出会按原始路径完整输出源码；PDF 导出已移除。</div>
+      </div>
+      <div className="card">
+        <div className="panel-title">当前对白语音</div>
+        <div className="tiny">{currentLineLabel || "当前不是可绑定对白"}</div>
+        <div className="row">
+          <select value={boundVoiceId} disabled={!currentLineId} onChange={(event) => onBindVoice(currentLineId, event.target.value)}>
+            <option value="">-- 不绑定上传语音 --</option>
+            {voiceList.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}
+          </select>
+          <button className="btn" disabled={!boundVoiceId} onClick={() => {
+            void (async () => {
+              const blob = await AssetDB.get<Blob>(AssetDB.STORE_ASSETS, boundVoiceId);
+              if (!blob) return;
+              const url = URL.createObjectURL(blob);
+              const audio = new Audio(url);
+              audio.volume = 0.85;
+              const release = () => URL.revokeObjectURL(url);
+              audio.onended = release;
+              audio.onerror = release;
+              await audio.play();
+            })();
+          }}>试听</button>
+          <span className="tiny mono">LINE · {currentLineId || "N/A"}</span>
+        </div>
       </div>
       <div className="card">
         <div className="panel-title">场景选择器</div>
@@ -230,7 +392,7 @@ export function AssetsPanel({
           <input value={assetQuery} onChange={(e) => onAssetQueryChange(e.target.value)} placeholder="输入文件名或标签" />
         </div>
         <div className="row">
-          {(["all", "backgrounds", "sprite", "video", "bgm", "sfx"] as const).map((kind) => (
+          {(["all", "backgrounds", "sprite", "video", "bgm", "sfx", "voice"] as const).map((kind) => (
             <button key={kind} className="btn" aria-pressed={assetFilter === kind} onClick={() => onAssetFilterChange(kind)}>
               {kind === "all" ? "全部" : kind}
             </button>
