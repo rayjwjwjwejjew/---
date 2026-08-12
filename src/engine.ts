@@ -1,5 +1,6 @@
 import { RAW_SCRIPT } from "./script";
 import { DEFAULT_BG, SCENE_BG, getScenePresentation } from "./vnStoryPresentation";
+import { attachStableIds, type IdentifiedLine } from "./vnState";
 
 export { DEFAULT_BG, SCENE_BG, getCgImage, getSceneBg, getScenePresentation } from "./vnStoryPresentation";
 
@@ -16,10 +17,15 @@ export interface ScriptLine {
   effect?: string;
   transition?: string;
   cg?: string;
+  chapterId?: string;
+  choiceId?: string;
+  cgId?: string;
 }
 
+export type IdentifiedScriptLine = ScriptLine & IdentifiedLine;
+
 export interface ParsedScript {
-  lines: ScriptLine[];
+  lines: IdentifiedScriptLine[];
   labelMap: Map<string, number>;
 }
 
@@ -142,18 +148,27 @@ export function parseScript(raw: string): ParsedScript {
   let pendingEffect: string | undefined;
   let pendingTransition: string | undefined;
   let pendingCg: string | undefined;
+  let pendingCgId: string | undefined;
+  let chapterId = "chapter-01";
 
   const flushLine = (line: Omit<ScriptLine, "act">) => {
-    out.push({ act, bgm: line.bgm ?? currentBgm, ...line });
+    out.push({ act, chapterId, bgm: line.bgm ?? currentBgm, ...line });
     pendingSfx = undefined;
     pendingEffect = undefined;
     pendingTransition = undefined;
     pendingCg = undefined;
+    pendingCgId = undefined;
   };
 
   for (let i = 0; i < linesRaw.length; i += 1) {
     let line = linesRaw[i].trim();
     if (!line) continue;
+
+    const chapterMarker = line.match(/^\[\[chapter:([\w.-]+)\]\]$/i);
+    if (chapterMarker) {
+      chapterId = chapterMarker[1];
+      continue;
+    }
 
     const actMatch = line.match(/^第([一二三四五六七八九十百0-9]+)幕：(.+)$/);
     const transMatch = line.match(/^(过渡幕|尾声)：(.+)$/);
@@ -202,6 +217,16 @@ export function parseScript(raw: string): ParsedScript {
         bracketSpeaker = null;
         continue;
       }
+      if (tag.startsWith("CG#")) {
+        const cgMatch = tag.match(/^CG#([\w.-]+)[：:](.+)$/);
+        if (cgMatch) {
+          pendingCgId = cgMatch[1];
+          pendingCg = cgMatch[2].trim();
+        }
+        pendingTransition = pendingTransition ?? "fade-white";
+        bracketSpeaker = null;
+        continue;
+      }
       if (tag.startsWith("CG：") || tag.startsWith("CG:")) {
         pendingCg = tag.replace(/^CG[：:]/, "").trim();
         pendingTransition = pendingTransition ?? "fade-white";
@@ -214,7 +239,8 @@ export function parseScript(raw: string): ParsedScript {
 
     if (bracketSpeaker === "SKIP_INNER") continue;
 
-    if (line.toLowerCase() === "[[choice]]") {
+    const choiceMarker = line.match(/^\[\[choice(?::([\w.-]+))?\]\]$/i);
+    if (choiceMarker) {
       const options: { text: string; cmd: string }[] = [];
       while (i + 1 < linesRaw.length) {
         const next = linesRaw[i + 1].trim();
@@ -227,13 +253,13 @@ export function parseScript(raw: string): ParsedScript {
         const [text = "……", cmd = ""] = next.replace(/^-+\s*/, "").split("->").map((item) => item.trim());
         options.push({ text, cmd });
       }
-      flushLine({ kind: "choice", speaker: "SYSTEM", options, scene: currentScene, sfx: pendingSfx, effect: pendingEffect, transition: pendingTransition, cg: pendingCg });
+      flushLine({ kind: "choice", choiceId: choiceMarker[1], speaker: "SYSTEM", options, scene: currentScene, sfx: pendingSfx, effect: pendingEffect, transition: pendingTransition, cg: pendingCg, cgId: pendingCgId });
       bracketSpeaker = null;
       continue;
     }
 
-    if (line.startsWith("@jump ")) {
-      flushLine({ kind: "line", speaker: "SYSTEM", text: `JUMP:${line.replace("@jump", "").trim()}`, scene: currentScene });
+    if (/^@(jump|set|inc|if)\s+/.test(line)) {
+      flushLine({ kind: "line", speaker: "SYSTEM", text: `COMMAND:${line}`, scene: currentScene });
       continue;
     }
 
@@ -249,19 +275,21 @@ export function parseScript(raw: string): ParsedScript {
         effect: pendingEffect,
         transition: pendingTransition,
         cg: pendingCg,
+        cgId: pendingCgId,
       });
       bracketSpeaker = null;
       continue;
     }
 
-    flushLine({ kind: "line", speaker: bracketSpeaker ?? "旁白", text: line, scene: currentScene, sfx: pendingSfx, effect: pendingEffect, transition: pendingTransition, cg: pendingCg });
+    flushLine({ kind: "line", speaker: bracketSpeaker ?? "旁白", text: line, scene: currentScene, sfx: pendingSfx, effect: pendingEffect, transition: pendingTransition, cg: pendingCg, cgId: pendingCgId });
   }
 
+  const identifiedLines = attachStableIds(out);
   const labelMap = new Map<string, number>();
-  out.forEach((item, index) => {
+  identifiedLines.forEach((item, index) => {
     if (item.kind === "label" && item.name) labelMap.set(item.name, index);
   });
-  return { lines: out, labelMap };
+  return { lines: identifiedLines, labelMap };
 }
 
 export const SCRIPT = parseScript(RAW_SCRIPT);

@@ -1,8 +1,6 @@
-import { memo, useSyncExternalStore, type ComponentProps, type ReactNode } from "react";
+import { memo, useSyncExternalStore, type ReactNode } from "react";
 import type { ChoiceTone } from "./vnDerived";
-import type { SaveSlot, Settings } from "./vnCore";
 import type { PlaybackTextStore } from "./vnPlaybackText";
-import { AssetsPanel, BgmPanel, DebugPanel, SavePanel, SettingsPanel } from "./vnPanels";
 import { DustCanvas } from "./vnVisuals";
 
 type SceneShellProps = {
@@ -65,6 +63,7 @@ type TitleLandingViewProps = {
   onStartNewGame: () => void;
   onContinueLastGame: () => void;
   onOpenSettings: () => void;
+  onOpenExtras: () => void;
   onOpenAssets: () => void;
   onToggleWorkspaceMode: () => void;
   onOpenQa: () => void;
@@ -80,6 +79,7 @@ export function TitleLandingView({
   onStartNewGame,
   onContinueLastGame,
   onOpenSettings,
+  onOpenExtras,
   onOpenAssets,
   onToggleWorkspaceMode,
   onOpenQa,
@@ -136,6 +136,10 @@ export function TitleLandingView({
           <button className="title-btn" onClick={onOpenSettings}>
             <span className="title-btn-icon">⚙</span>
             <span>设置</span>
+          </button>
+          <button className="title-btn" onClick={onOpenExtras}>
+            <span className="title-btn-icon">◇</span>
+            <span>鉴赏</span>
           </button>
           {workspaceMode === "editor" && (
             <button className="title-btn" onClick={onOpenAssets}>
@@ -524,7 +528,7 @@ type DialogueHudViewProps = {
   getChoiceTone: (text: string) => ChoiceTone;
   getChoiceToneLabel: (tone: ChoiceTone) => string;
   onNext: () => void;
-  onChoice: (cmd: string) => void;
+  onChoice: (option: { text: string; cmd: string }) => void;
 };
 
 export const DialogueHudView = memo(function DialogueHudView({
@@ -579,7 +583,7 @@ export const DialogueHudView = memo(function DialogueHudView({
                   className={`choice choice-${choiceTone}`}
                   onClick={(event) => {
                     event.stopPropagation();
-                    onChoice(opt.cmd);
+                    onChoice(opt);
                   }}
                 >
                   <span className="choice-tone-label">{getChoiceToneLabel(choiceTone)}</span>
@@ -603,9 +607,10 @@ type BacklogViewProps = {
   visible: boolean;
   log: { who: string; text: string }[];
   onClose: () => void;
+  choices?: { text: string; at: string }[];
 };
 
-export const BacklogView = memo(function BacklogView({ visible, log, onClose }: BacklogViewProps) {
+export const BacklogView = memo(function BacklogView({ visible, log, onClose, choices = [] }: BacklogViewProps) {
   return (
     <div id="backlog" className={visible ? "show" : ""}>
       <div className="wrap">
@@ -614,6 +619,12 @@ export const BacklogView = memo(function BacklogView({ visible, log, onClose }: 
           <button className="btn" onClick={onClose}>关闭</button>
         </div>
         <div className="list">
+          {choices.slice().reverse().map((choice) => (
+            <div className="item choice-history-item" key={`${choice.at}_${choice.text}`}>
+              <div className="who">选择</div>
+              <div className="txt">{choice.text}</div>
+            </div>
+          ))}
           {log
             .slice()
             .reverse()
@@ -656,193 +667,6 @@ export const PresentationOverlays = memo(function PresentationOverlays({
             <div className="opening-prelude-title">{openingPreludeText}</div>
             <div className="opening-prelude-copy">黑场、字幕、环境音和轻微推进，正在把这一幕正式拉开。</div>
           </div>
-        </div>
-      )}
-    </>
-  );
-});
-
-type DebugMarker = {
-  line: { kind: string; text?: string; name?: string; speaker?: string };
-  idx: number;
-};
-
-type PlayingPanelsViewProps = {
-  activePanel: string | null;
-  isEditorMode: boolean;
-  settings: Settings;
-  currentIndex: number;
-  currentScene?: string;
-  currentBgmName: string;
-  currentEffect?: string;
-  onSettingsChange: (updater: (value: Settings) => Settings) => void;
-  onSettingsReset: () => void;
-  assetsPanelProps: ComponentProps<typeof AssetsPanel>;
-  selectedSaveSlot: number;
-  onSelectedSaveSlotChange: (value: number) => void;
-  onSaveCurrentSlot: () => void;
-  onUpdateContinue: () => void;
-  saveSlots: Array<SaveSlot | null>;
-  getSavePreview: (slot: SaveSlot | null, index: number) => { imageUrl: string; location: string; excerpt: string } | null;
-  onSelectSlot: (value: number) => void;
-  onSaveSlot: (value: number) => void;
-  onLoadSlot: (value: number) => void;
-  onDeleteSlot: (value: number) => void;
-  getSavedAtLabel: (savedAt: string) => string;
-  debugMarkers: DebugMarker[];
-  onJumpStart: () => void;
-  onJumpRandom: () => void;
-  onTriggerCg: () => void;
-  onSwitchBg: () => void;
-  onSwitchEmotion: () => void;
-  onFlashWhite: () => void;
-  onGoToMarker: (idx: number) => void;
-  debugPage: number;
-  debugPageCount: number;
-  debugCount: number;
-  onDebugPageChange: (value: number) => void;
-  bgmPlaying: boolean;
-  bgmMuted: boolean;
-  currentBgmLabel: string;
-  currentBgmId: string;
-  bgmList: { id: string; label: string }[];
-  onToggleBgm: () => void;
-  onStopBgm: () => void;
-  onToggleMute: () => void;
-  onLoadAndPlayBgm: (id: string) => void;
-};
-
-export const PlayingPanelsView = memo(function PlayingPanelsView({
-  activePanel,
-  isEditorMode,
-  settings,
-  currentIndex,
-  currentScene,
-  currentBgmName,
-  currentEffect,
-  onSettingsChange,
-  onSettingsReset,
-  assetsPanelProps,
-  selectedSaveSlot,
-  onSelectedSaveSlotChange,
-  onSaveCurrentSlot,
-  onUpdateContinue,
-  saveSlots,
-  getSavePreview,
-  onSelectSlot,
-  onSaveSlot,
-  onLoadSlot,
-  onDeleteSlot,
-  getSavedAtLabel,
-  debugMarkers,
-  onJumpStart,
-  onJumpRandom,
-  onTriggerCg,
-  onSwitchBg,
-  onSwitchEmotion,
-  onFlashWhite,
-  onGoToMarker,
-  debugPage,
-  debugPageCount,
-  debugCount,
-  onDebugPageChange,
-  bgmPlaying,
-  bgmMuted,
-  currentBgmLabel,
-  currentBgmId,
-  bgmList,
-  onToggleBgm,
-  onStopBgm,
-  onToggleMute,
-  onLoadAndPlayBgm,
-}: PlayingPanelsViewProps) {
-  return (
-    <>
-      {isEditorMode && activePanel === "assets" && (
-        <div className="panel show">
-          <AssetsPanel {...assetsPanelProps} />
-        </div>
-      )}
-
-      {activePanel === "save" && (
-        <div className="panel show">
-          <SavePanel
-            selectedSaveSlot={selectedSaveSlot}
-            onSelectedSaveSlotChange={onSelectedSaveSlotChange}
-            onSaveCurrentSlot={onSaveCurrentSlot}
-            onUpdateContinue={onUpdateContinue}
-            saveSlots={saveSlots}
-            getSavePreview={getSavePreview}
-            onSelectSlot={onSelectSlot}
-            onSaveSlot={onSaveSlot}
-            onLoadSlot={onLoadSlot}
-            onDeleteSlot={onDeleteSlot}
-            getSavedAtLabel={getSavedAtLabel}
-          />
-        </div>
-      )}
-
-      {isEditorMode && activePanel === "debug" && (
-        <div className="panel show">
-          <DebugPanel
-            debugMarkers={debugMarkers}
-            onJumpStart={onJumpStart}
-            onJumpRandom={onJumpRandom}
-            onTriggerCg={onTriggerCg}
-            onSwitchBg={onSwitchBg}
-            onSwitchEmotion={onSwitchEmotion}
-            onFlashWhite={onFlashWhite}
-            onGoToMarker={onGoToMarker}
-            debugPage={debugPage}
-            debugPageCount={debugPageCount}
-            debugCount={debugCount}
-            onDebugPageChange={onDebugPageChange}
-          />
-        </div>
-      )}
-
-      {activePanel === "settings" && (
-        <div className="panel show">
-          <SettingsPanel settings={settings} onChange={onSettingsChange} onReset={onSettingsReset} />
-          <div className="card">
-            <div className="row">
-              <span className="label">场景信息</span>
-              <span className="tiny mono">
-                #{currentIndex} · {currentScene || "无场景标记"}
-              </span>
-            </div>
-            {currentBgmName && (
-              <div className="row">
-                <span className="label">当前BGM</span>
-                <span className="tiny mono">{currentBgmName}</span>
-              </div>
-            )}
-            {currentEffect && (
-              <div className="row">
-                <span className="label">当前特效</span>
-                <span className="tiny mono">{currentEffect}</span>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {activePanel === "bgm" && (
-        <div className="panel show">
-          <BgmPanel
-            bgmPlaying={bgmPlaying}
-            bgmMuted={bgmMuted}
-            currentBgmLabel={currentBgmLabel}
-            currentBgmId={currentBgmId}
-            bgmList={bgmList}
-            bgmVol={settings.bgmVol}
-            sfxVol={settings.sfxVol}
-            onToggleBgm={onToggleBgm}
-            onStopBgm={onStopBgm}
-            onToggleMute={onToggleMute}
-            onLoadAndPlayBgm={onLoadAndPlayBgm}
-            onSettingsChange={onSettingsChange}
-          />
         </div>
       )}
     </>

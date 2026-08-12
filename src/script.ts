@@ -1,6 +1,7 @@
-export const RAW_SCRIPT = String.raw`第一幕：黎明前刻
+export const RAW_SCRIPT = String.raw`[[chapter:chapter-01]]
+第一幕：黎明前刻
 【BGM：悲伤钢琴曲】
-【CG：黎明前的校园，警笛闪烁】
+【CG#cg-opening：黎明前的校园，警笛闪烁】
 【旁白】
 警笛声划破黎明前的寂静。
 【旁白】
@@ -28,6 +29,7 @@ export const RAW_SCRIPT = String.raw`第一幕：黎明前刻
 【旁白】
 故事，要从不久前的那个午后说起。
 
+[[chapter:chapter-02]]
 第二幕：执念之初
 【BGM：日常校园曲】
 【场景：学校走廊，午后】
@@ -89,7 +91,7 @@ export const RAW_SCRIPT = String.raw`第一幕：黎明前刻
 【旁白】
 俞的眼神里，闪过一丝锐从未见过的光芒。
 
-[[choice]]
+[[choice:choice-ch02-basement]]
 
 算了，不要那个球了。 -> @jump c2_give_up
 既然如此，去看看吧。 -> @jump c2_explore
@@ -164,7 +166,7 @@ export const RAW_SCRIPT = String.raw`第一幕：黎明前刻
 俞没有回答。
 【旁白】
 锐顺着他的方向望去，似乎是唯一一处有微光渗透的地方。
-【CG：墙上的血脸】
+【CG#cg-blood-face：墙上的血脸】
 【音效：心跳声加速】
 【旁白】
 锐突然脸色变得苍白。
@@ -246,6 +248,7 @@ export const RAW_SCRIPT = String.raw`第一幕：黎明前刻
 【旁白】
 好像有人本来想留下更多信息，却被什么打断了。
 
+[[chapter:chapter-03]]
 第三幕：精神压力
 【BGM：不安的夜曲】
 【场景：寝室，深夜】
@@ -336,6 +339,7 @@ export const RAW_SCRIPT = String.raw`第一幕：黎明前刻
 风从通风口灌进来，吹得后背一阵阵发凉。
 蒋：（自言自语）这家伙到底在搞什么……
 
+[[chapter:chapter-04]]
 第四幕：虚实难辨
 【BGM：疑惑的日常曲】
 【场景：宿舍楼下】
@@ -403,6 +407,7 @@ export const RAW_SCRIPT = String.raw`第一幕：黎明前刻
 锐：给你一桶泡面，再加上两包牛肉？
 蒋：我当然信了。
 
+[[chapter:chapter-05]]
 第五幕：将信将疑
 【BGM：若有所思的曲调】
 【场景：校友返校日活动后，走廊】
@@ -507,6 +512,7 @@ export const RAW_SCRIPT = String.raw`第一幕：黎明前刻
 【旁白】
 锐这才露出了今天第一个真正放松的笑容。
 
+[[chapter:chapter-06]]
 第六幕：第三天的地下室
 【BGM：悬疑调查曲】
 【旁白】
@@ -564,6 +570,7 @@ export const RAW_SCRIPT = String.raw`第一幕：黎明前刻
 锐：（顿了一下）……没，在管道里卡住了吧。
 教导处老师：那就算了，下次注意别打那么偏。
 
+[[chapter:chapter-07]]
 第七幕：食堂里的学长与图书馆
 【BGM：转折的调查曲】
 【场景：食堂，第四天中午】
@@ -596,7 +603,7 @@ export const RAW_SCRIPT = String.raw`第一幕：黎明前刻
 蒋：你还记得那两个学长叫什么吗？
 孙学长：不记得全名了，一个姓马，一个姓余。你们要是好奇，去图书馆翻档案，肯定能翻出来。
 
-[[choice]]
+[[choice:choice-ch07-library]]
 
 认真一点，请学长以后也帮忙留意。 -> @jump c7_ask_help
 当成玩笑一笑而过。 -> @jump c7_joke
@@ -649,6 +656,7 @@ export const RAW_SCRIPT = String.raw`第一幕：黎明前刻
 【旁白】
 老师还提到，余笙现在还在附属医院。
 
+[[chapter:chapter-08]]
 第八幕：植物人学长与他的妈妈
 【BGM：悲伤的探访曲】
 【场景：附属医院门口，第五天周末】
@@ -668,7 +676,7 @@ export const RAW_SCRIPT = String.raw`第一幕：黎明前刻
 植物人学长的妈妈：（看了他们几秒，轻声）那进来吧。
 
 【场景：病房内】
-【CG：躺在病床上的余笙】
+【CG#cg-hospital-bed：躺在病床上的余笙】
 【旁白】
 病床上的人瘦得只剩下骨架。
 【旁白】
@@ -727,6 +735,7 @@ export const RAW_SCRIPT = String.raw`第一幕：黎明前刻
 【旁白】
 她没有继续说下去。
 
+[[chapter:chapter-interlude]]
 过渡幕：沉重的回程
 【BGM：忧郁的钢琴曲】
 【场景：回学校的公交车上】
@@ -742,6 +751,7 @@ export const RAW_SCRIPT = String.raw`第一幕：黎明前刻
 蒋：你是说小猫？
 锐：我是说真相。
 
+[[chapter:chapter-09]]
 第九幕：花园与怀疑
 【BGM：压抑的日常曲】
 【场景：教室窗边，周一】
@@ -785,6 +795,7 @@ export const RAW_SCRIPT = String.raw`第一幕：黎明前刻
 蒋：你是说——
 锐：我什么都没说。
 
+[[chapter:chapter-10]]
 第十幕：花园里的手指骨
 【BGM：紧张的高潮曲】
 【场景：暴雨中的花园】
@@ -796,7 +807,7 @@ export const RAW_SCRIPT = String.raw`第一幕：黎明前刻
 【场景：教学楼内，傍晚自习前】
 蒋：（看了看手机时间，又看向窗外）要走吗？
 
-[[choice]]
+[[choice:choice-ch10-dig]]
 
 现在就去花园。 -> @jump c10_go_now
 再等等，看雨会不会小一点。 -> @jump c10_wait
@@ -847,7 +858,7 @@ export const RAW_SCRIPT = String.raw`第一幕：黎明前刻
 两人合力把那一小块被他滑倒时弄松的泥翻起来。
 【旁白】
 下面露出了一截苍白的东西。
-【CG：泥土中露出的指骨】
+【CG#cg-bone：泥土中露出的指骨】
 【音效：惊恐的心跳声】
 蒋：（声音明显抖了一下）这……是木头？
 锐：木头会长成这种形状？
@@ -860,6 +871,7 @@ export const RAW_SCRIPT = String.raw`第一幕：黎明前刻
 【旁白】
 他们退到花园边缘，拨通了报警电话。
 
+[[chapter:chapter-11]]
 第十一幕：不愿被证实的真相
 【BGM：纠结的情感曲】
 【场景：学校行政楼一楼小会议室外，下午】
@@ -891,7 +903,7 @@ export const RAW_SCRIPT = String.raw`第一幕：黎明前刻
 【旁白】
 锐和蒋站在门口。
 
-[[choice]]
+[[choice:choice-ch11-response]]
 
 坐到马佳宁对面，从她的角度出发去劝。 -> @jump c11_empathy
 先安抚蒋，再转向马佳宁。 -> @jump c11_calm_jiang
@@ -962,6 +974,7 @@ export const RAW_SCRIPT = String.raw`第一幕：黎明前刻
 锐：重要。但我现在知道了，真相不是挖出来就行的。
 锐：挖出来之后，还得有人接得住。
 
+[[chapter:chapter-12]]
 第十二幕：确认
 【BGM：沉重的揭示曲】
 【旁白】
@@ -976,7 +989,7 @@ export const RAW_SCRIPT = String.raw`第一幕：黎明前刻
 锐：我听说了。
 马佳宁：是他。
 
-[[choice]]
+[[choice:choice-ch12-truth]]
 
 把你知道的所有细节都告诉她。 -> @jump c12_tell_all
 只告诉她必要的部分，保留那些残酷的细节。 -> @jump c12_partial
@@ -1014,6 +1027,7 @@ export const RAW_SCRIPT = String.raw`第一幕：黎明前刻
 【旁白】
 但她的背挺得很直。
 
+[[chapter:chapter-13]]
 第十三幕：日记本的归位
 【BGM：紧张的潜入曲】
 【旁白】
@@ -1067,6 +1081,7 @@ export const RAW_SCRIPT = String.raw`第一幕：黎明前刻
 【旁白】
 那一晚，他们把本子装进匿名信封里，塞进了派出所的举报箱。
 
+[[chapter:chapter-14]]
 第十四幕：调查与结局
 【BGM：沉重的审判曲】
 【旁白】
@@ -1107,6 +1122,7 @@ export const RAW_SCRIPT = String.raw`第一幕：黎明前刻
 【旁白】
 走廊里一阵沉默。
 
+[[chapter:chapter-epilogue]]
 尾声：魂归于天
 【BGM：治愈的告别曲】
 【旁白】
@@ -1143,7 +1159,7 @@ export const RAW_SCRIPT = String.raw`第一幕：黎明前刻
 【旁白】
 然后转身，走向了教学楼的方向。
 
-【CG：学校天台，夕阳西下】
+【CG#cg-rooftop：学校天台，夕阳西下】
 【场景：学校天台，夕阳西下】
 【旁白】
 一切尘埃落定。
@@ -1167,7 +1183,7 @@ export const RAW_SCRIPT = String.raw`第一幕：黎明前刻
 他不再是那个穿着现在校服、模模糊糊的“小猫”。
 【旁白】
 而是穿着2017届旧款棒球服的少年。
-【CG：马树衡的灵魂，穿着棒球服，手持24号球棒，逆光微笑】
+【CG#cg-spirit：马树衡的灵魂，穿着棒球服，手持24号球棒，逆光微笑】
 【旁白】
 那是马树衡。
 【旁白】
@@ -1185,7 +1201,7 @@ export const RAW_SCRIPT = String.raw`第一幕：黎明前刻
 【旁白】
 终于在这个真相大白的黄昏，魂归于天。
 
-[[choice]]
+[[choice:choice-epilogue-farewell]]
 
 不会。我会记住所有人。 -> @jump ending_remember
 也许会。但现在不重要。 -> @jump ending_letgo

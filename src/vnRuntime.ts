@@ -6,10 +6,12 @@ import { ensureImageReady, queueImagePreload } from "./vnMedia";
 import { createPlaybackTextRuntime } from "./vnPlaybackText";
 import { CORNER_IMG_URL, TITLE_SCREEN_BG } from "./vnContent";
 import { findBestAssetMatch, getBgmMoodClass, getCurrentBgmLabel } from "./vnDerived";
+import { canSkipLine } from "./vnState";
 import {
   STORAGE_KEYS,
   normalizeManifest,
-  readJson,
+  readManifest,
+  readContinueSave,
   readSaveSlots,
   readSceneBgOverrides,
   type SaveSlot,
@@ -51,7 +53,7 @@ type UseSaveRuntimeArgs = {
   buildSnapshot: () => SaveSlot;
   bgmList: AudioItem[];
   selectedSaveSlot: number;
-  onRestoreSession: (session: { index: number; log: { who: string; text: string }[]; act: string; bgmName: string }) => void;
+  onRestoreSession: (session: { index: number; log: { who: string; text: string }[]; act: string; bgmName: string; routeState?: SaveSlot["routeState"] }) => void;
   onStopBgm: () => void;
   onLoadBgmById: (assetId: string) => Promise<void>;
   onResetPresentationState: () => void;
@@ -74,6 +76,13 @@ type UsePlaybackRuntimeArgs = {
   onJump: (nextIndex: number) => void;
   onEnterCredits: () => void;
   onAppendLog: (item: { who: string; text: string }) => void;
+  onBeforeAdvance: () => void;
+  onLineSeen: (line: ScriptLine) => void;
+  isLineSeen: (lineId: string | undefined) => boolean;
+  onRunCommand: (command: string) => string | undefined;
+  onRecordChoice: (line: ScriptLine, option: { text: string; cmd: string }) => string | undefined;
+  voicePlaying: boolean;
+  autosaveEnabled: boolean;
   onQuickSave: () => void;
   onToggleLog: () => void;
   onCloseOverlays: () => void;
@@ -141,15 +150,6 @@ type UseStageEffectsRuntimeArgs = {
   setCurrentBgmName: (name: string) => void;
 };
 
-function safeParseJson<T>(raw: string | null, fallback: T): T {
-  if (!raw) return fallback;
-  try {
-    return JSON.parse(raw) as T;
-  } catch {
-    return fallback;
-  }
-}
-
 function buildEffectClasses(effectActive: string, sceneBlur: boolean) {
   return [
     effectActive === "shake" ? "fx-shake" : "",
@@ -202,6 +202,8 @@ export function useShellRuntime({
     root.setProperty("--sprite-y", `${settings.spriteY}px`);
     root.setProperty("--sprite-x", `${settings.spriteX}px`);
     root.setProperty("--ui-alpha", `${0.05 + settings.uiAlpha / 420}`);
+    root.setProperty("--text-scale", `${settings.textScale / 100}`);
+    root.setProperty("--line-height", `${settings.lineHeight / 100}`);
     root.setProperty("--title-bg-url", `url("${TITLE_SCREEN_BG}")`);
   }, [settings]);
 
@@ -365,7 +367,7 @@ export function useLibraryRuntime({ initialManifest, onManifestChange }: UseLibr
 
   const refreshLibrary = useCallback(() => {
     try {
-      const manifest = normalizeManifest(readJson<Manifest>(STORAGE_KEYS.manifest, {}));
+      const manifest = readManifest();
       setManifestState(manifest);
       setBgmList(manifest.bgm || []);
       setSfxList(manifest.sfx || []);
@@ -383,10 +385,10 @@ export function useLibraryRuntime({ initialManifest, onManifestChange }: UseLibr
   }, [refreshLibrary]);
 
   const uploadAsset = useCallback(
-    async (kind: "bg" | "sprite" | "video" | "bgm" | "sfx") => {
+    async (kind: "bg" | "sprite" | "video" | "bgm" | "sfx" | "voice") => {
       const input = document.createElement("input");
       input.type = "file";
-      input.accept = kind === "bgm" || kind === "sfx" ? "audio/*" : kind === "video" ? "video/*" : "image/*";
+      input.accept = kind === "bgm" || kind === "sfx" || kind === "voice" ? "audio/*" : kind === "video" ? "video/*" : "image/*";
       input.onchange = async () => {
         const file = input.files?.[0];
         if (!file) return;
@@ -394,7 +396,7 @@ export function useLibraryRuntime({ initialManifest, onManifestChange }: UseLibr
         const id = `${kind}_${crypto.randomUUID()}`;
         await AssetDB.put(AssetDB.STORE_ASSETS, id, file);
         try {
-          const manifest = normalizeManifest(readJson<Manifest>(STORAGE_KEYS.manifest, {}));
+          const manifest = readManifest();
           const key = kind === "bg" ? "backgrounds" : kind;
           manifest[key] = [{ id, label }, ...((manifest[key] || []) as { id: string; label: string }[])];
           localStorage.setItem(STORAGE_KEYS.manifest, JSON.stringify(manifest));
@@ -413,7 +415,7 @@ export function useLibraryRuntime({ initialManifest, onManifestChange }: UseLibr
     const next = prompt("批量重命名：输入前缀");
     if (!next) return;
     const updated: Manifest = { ...manifestState };
-    (["backgrounds", "sprite", "video", "bgm", "sfx"] as const).forEach((kind) => {
+    (["backgrounds", "sprite", "video", "bgm", "sfx", "voice"] as const).forEach((kind) => {
       updated[kind] = (updated[kind] || []).map((item, idx) => ({ ...item, label: `${next}-${idx + 1}` }));
     });
     localStorage.setItem(STORAGE_KEYS.manifest, JSON.stringify(updated));
@@ -693,7 +695,7 @@ export function useSaveRuntime({
   pulseUi,
 }: UseSaveRuntimeArgs) {
   const [saveSlots, setSaveSlots] = useState<Array<SaveSlot | null>>(() => readSaveSlots(SAVE_SLOT_COUNT));
-  const [hasContinueSave, setHasContinueSave] = useState(() => Boolean(safeParseJson<SaveSlot | null>(localStorage.getItem(STORAGE_KEYS.save), null)));
+  const [hasContinueSave, setHasContinueSave] = useState(() => Boolean(readContinueSave()));
   const restoreSessionRef = useRef(onRestoreSession);
 
   useEffect(() => {
@@ -738,6 +740,7 @@ export function useSaveRuntime({
         log: slot.log || [],
         act: slot.act || "",
         bgmName: slot.bgmName || "",
+        routeState: slot.routeState,
       });
       onResetPresentationState();
       onStopBgm();
@@ -760,7 +763,7 @@ export function useSaveRuntime({
   );
 
   const continueLastGame = useCallback(() => {
-    const lastSave = safeParseJson<SaveSlot | null>(localStorage.getItem(STORAGE_KEYS.save), null);
+    const lastSave = readContinueSave();
     if (!lastSave) return;
     void restoreSave(lastSave);
   }, [restoreSave]);
@@ -778,7 +781,7 @@ export function useSaveRuntime({
 
   useEffect(() => {
     const onStorage = () => {
-      setHasContinueSave(Boolean(safeParseJson<SaveSlot | null>(localStorage.getItem(STORAGE_KEYS.save), null)));
+      setHasContinueSave(Boolean(readContinueSave()));
     };
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
@@ -810,6 +813,13 @@ export function usePlaybackRuntime({
   onJump,
   onEnterCredits,
   onAppendLog,
+  onBeforeAdvance,
+  onLineSeen,
+  isLineSeen,
+  onRunCommand,
+  onRecordChoice,
+  voicePlaying,
+  autosaveEnabled,
   onQuickSave,
   onToggleLog,
   onCloseOverlays,
@@ -838,9 +848,10 @@ export function usePlaybackRuntime({
       onEnterCredits();
       return;
     }
-    if (line.speaker === "SYSTEM" && line.text?.startsWith("JUMP:")) {
-      const label = line.text.slice(5).trim();
-      const target = SCRIPT.labelMap.get(label);
+    if (line.speaker === "SYSTEM" && (line.text?.startsWith("COMMAND:") || line.text?.startsWith("JUMP:"))) {
+      const command = line.text.startsWith("COMMAND:") ? line.text.slice(8).trim() : `@jump ${line.text.slice(5).trim()}`;
+      const label = onRunCommand(command);
+      const target = label ? SCRIPT.labelMap.get(label) : undefined;
       onJump(typeof target === "number" ? target : Math.min(SCRIPT.lines.length, index + 1));
       return;
     }
@@ -849,19 +860,24 @@ export function usePlaybackRuntime({
     if (line.kind !== "choice") {
       pulseUi(line.effect && line.effect !== "none" ? "emotion" : "story");
     }
+    const allowSkip = canSkipLine(line, isLineSeen(line.lineId), settings.skipUnseen);
+    if (skip && !allowSkip) setSkip(false);
     textRuntime.play({
       text: line.kind === "choice" ? "请选择：" : line.text || "",
       typeMs: settings.typeMs,
-      instant: skip,
+      instant: skip && allowSkip,
       onStart: () => setTyping(true),
       onReveal: () => setTextVisible(true),
-      onComplete: () => setTyping(false),
+      onComplete: () => {
+        setTyping(false);
+        onLineSeen(line);
+      },
     });
 
     return () => {
       textRuntime.cancel();
     };
-  }, [index, line, onEnterCredits, onJump, phase, pulseUi, settings.typeMs, skip, textRuntime]);
+  }, [index, isLineSeen, line, onEnterCredits, onJump, onLineSeen, onRunCommand, phase, pulseUi, settings.skipUnseen, settings.typeMs, skip, textRuntime]);
 
   const handleNext = useCallback(() => {
     if (phase !== "playing" || !line) return;
@@ -872,6 +888,7 @@ export function usePlaybackRuntime({
     if (textRuntime.complete()) return;
     if (line.kind === "choice") return;
     if (line.kind === "label") {
+      onBeforeAdvance();
       onAdvance();
       return;
     }
@@ -881,8 +898,9 @@ export function usePlaybackRuntime({
     if (line.cg) {
       pulseUi("cg");
     }
+    onBeforeAdvance();
     onAdvance();
-  }, [cgVisible, closeCg, line, onAdvance, onAppendLog, phase, pulseUi, textRuntime]);
+  }, [cgVisible, closeCg, line, onAdvance, onAppendLog, onBeforeAdvance, phase, pulseUi, textRuntime]);
 
   const handlePrev = useCallback(() => {
     if (phase !== "playing") return;
@@ -904,23 +922,30 @@ export function usePlaybackRuntime({
   }, [index, onBacktrack, phase, textRuntime]);
 
   const handleChoice = useCallback(
-    (cmd: string) => {
-      if (cmd.startsWith("@jump")) {
-        const label = cmd.replace("@jump", "").trim();
+    (option: { text: string; cmd: string }) => {
+      if (!line) return;
+      onBeforeAdvance();
+      onLineSeen(line);
+      const label = onRecordChoice(line, option);
+      if (label) {
         const target = SCRIPT.labelMap.get(label);
         onJump(typeof target === "number" ? target : index + 1);
         return;
       }
       onAdvance();
     },
-    [index, onAdvance, onJump],
+    [index, line, onAdvance, onBeforeAdvance, onJump, onLineSeen, onRecordChoice],
   );
 
   useEffect(() => {
     if (autoTimeoutRef.current) {
       window.clearTimeout(autoTimeoutRef.current);
     }
-    if (phase !== "playing" || (!auto && !skip) || typing || line?.kind === "choice" || !line) return;
+    if (phase !== "playing" || (!auto && !skip) || typing || voicePlaying || line?.kind === "choice" || !line) return;
+    if (skip && !canSkipLine(line, isLineSeen(line.lineId), settings.skipUnseen)) {
+      setSkip(false);
+      return;
+    }
     const delay = skip ? 50 : Math.max(180, settings.autoMs);
     autoTimeoutRef.current = window.setTimeout(handleNext, delay);
     return () => {
@@ -928,7 +953,7 @@ export function usePlaybackRuntime({
         window.clearTimeout(autoTimeoutRef.current);
       }
     };
-  }, [auto, handleNext, line, phase, settings.autoMs, skip, typing]);
+  }, [auto, handleNext, isLineSeen, line, phase, settings.autoMs, settings.skipUnseen, skip, typing, voicePlaying]);
 
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
@@ -981,14 +1006,14 @@ export function usePlaybackRuntime({
 
   useEffect(() => {
     if (autosaveTimeoutRef.current) window.clearTimeout(autosaveTimeoutRef.current);
-    if (phase !== "playing" || index <= 0) return;
+    if (!autosaveEnabled || phase !== "playing" || index <= 0) return;
 
     // Local storage writes can hitch auto/skip playback, so save after the reader pauses.
     autosaveTimeoutRef.current = window.setTimeout(onQuickSave, 700);
     return () => {
       if (autosaveTimeoutRef.current) window.clearTimeout(autosaveTimeoutRef.current);
     };
-  }, [index, onQuickSave, phase]);
+  }, [autosaveEnabled, index, onQuickSave, phase]);
 
   useEffect(() => {
     return () => {
@@ -1029,6 +1054,8 @@ type UseBackgroundRuntimeArgs = {
   line?: ScriptLine;
   phase: string;
   lowPerfMode: boolean;
+  transitionLevel: Settings["transitionLevel"];
+  reducedMotion: boolean;
   pulseUi: (_layer?: string) => void;
 };
 
@@ -1042,6 +1069,8 @@ type UsePresentationRuntimeArgs = {
   lowPerfMode: boolean;
   pulseUi: (_layer?: string) => void;
   onAdvance: () => void;
+  onCgShown: (line: ScriptLine | undefined) => void;
+  onBeforeAdvance: () => void;
 };
 
 export function isKeySceneTransition(line?: ScriptLine) {
@@ -1122,6 +1151,8 @@ export function useBackgroundRuntime({
   line,
   phase,
   lowPerfMode,
+  transitionLevel,
+  reducedMotion,
   pulseUi,
 }: UseBackgroundRuntimeArgs) {
   const [bgUrl, setBgUrl] = useState<string>(DEFAULT_BG);
@@ -1280,9 +1311,10 @@ export function useBackgroundRuntime({
     if (nextBg !== lastBgRef.current) {
       let cancelled = false;
       let clearTimer: number | null = null;
-      const nextTransition = isKeySceneTransition(line) ? line.transition || "dissolve" : "cut";
+      const keyScene = isKeySceneTransition(line);
+      const nextTransition = transitionLevel === "all" ? line.transition || "dissolve" : transitionLevel === "key" && keyScene ? line.transition || "dissolve" : "cut";
       const currentBg = bgUrl || lastBgRef.current || DEFAULT_BG;
-      const shouldAnimateTransition = !lowPerfMode && nextTransition !== "cut";
+      const shouldAnimateTransition = !lowPerfMode && !reducedMotion && transitionLevel !== "off" && nextTransition !== "cut";
 
       if (shouldAnimateTransition) {
         setPrevBgUrl(currentBg);
@@ -1315,7 +1347,7 @@ export function useBackgroundRuntime({
       };
     }
     return undefined;
-  }, [bgUrl, ensureBackgroundAssetUrl, index, line, lowPerfMode, phase, pulseUi, resolveSceneBackground, sceneBgOverrides]);
+  }, [bgUrl, ensureBackgroundAssetUrl, index, line, lowPerfMode, phase, pulseUi, reducedMotion, resolveSceneBackground, sceneBgOverrides, transitionLevel]);
 
   useEffect(() => {
     return () => {
@@ -1364,6 +1396,8 @@ export function usePresentationRuntime({
   lowPerfMode,
   pulseUi,
   onAdvance,
+  onCgShown,
+  onBeforeAdvance,
 }: UsePresentationRuntimeArgs) {
   const [cgVisible, setCgVisible] = useState(false);
   const [cgClosing, setCgClosing] = useState(false);
@@ -1471,6 +1505,10 @@ export function usePresentationRuntime({
     void video.play().catch(() => undefined);
   }, [cgMediaKind, cgVisible, cgVideoUrl]);
 
+  useEffect(() => {
+    if (cgVisible && line?.cg) onCgShown(line);
+  }, [cgVisible, line, onCgShown]);
+
   const closeCg = useCallback((advance = false) => {
     if (!cgVisible) return;
     cgSeenRef.current = `${index}:${line?.cg || ""}`;
@@ -1487,11 +1525,12 @@ export function usePresentationRuntime({
       setCgMediaKind("image");
       setCgVideoUrl("");
       if (advance && phase === "playing") {
+        onBeforeAdvance();
         onAdvance();
       }
       cgCloseTimerRef.current = null;
     }, 240);
-  }, [cgVisible, index, line?.cg, onAdvance, phase, pulseUi]);
+  }, [cgVisible, index, line?.cg, onAdvance, onBeforeAdvance, phase, pulseUi]);
 
   const triggerOpeningPrelude = useCallback((text: string) => {
     if (preludeTimerRef.current) window.clearTimeout(preludeTimerRef.current);
@@ -1560,6 +1599,12 @@ export function useAudioRuntime({ settings, bgmList }: UseAudioRuntimeArgs) {
   const fadeInTimerRef = useRef<number | null>(null);
   const fadeOutTimerRef = useRef<number | null>(null);
   const retiringBgmUrlRef = useRef("");
+  const voiceDuckingRef = useRef(false);
+
+  const getTargetBgmVolume = useCallback(
+    () => (settings.bgmVol / 100) * (voiceDuckingRef.current ? Math.max(0, 1 - settings.bgmDuck / 100) : 1),
+    [settings.bgmDuck, settings.bgmVol],
+  );
 
   const clearFadeTimers = useCallback(() => {
     if (fadeInTimerRef.current) window.clearInterval(fadeInTimerRef.current);
@@ -1579,10 +1624,18 @@ export function useAudioRuntime({ settings, bgmList }: UseAudioRuntimeArgs) {
   }, []);
 
   useEffect(() => {
-    bgmRef.current.volume = settings.bgmVol / 100;
-    bgmFadeRef.current.volume = settings.bgmVol / 100;
+    const targetVolume = getTargetBgmVolume();
+    bgmRef.current.volume = targetVolume;
+    bgmFadeRef.current.volume = targetVolume;
     sfxRef.current.volume = settings.sfxVol / 100;
-  }, [settings.bgmVol, settings.sfxVol]);
+  }, [getTargetBgmVolume, settings.sfxVol]);
+
+  const setVoiceDucking = useCallback((active: boolean) => {
+    voiceDuckingRef.current = active;
+    const targetVolume = getTargetBgmVolume();
+    bgmRef.current.volume = targetVolume;
+    bgmFadeRef.current.volume = targetVolume;
+  }, [getTargetBgmVolume]);
 
   const pulseUi = useCallback((_layer = "ui") => {
     if (uiPulseRef.current) window.clearTimeout(uiPulseRef.current);
@@ -1635,7 +1688,7 @@ export function useAudioRuntime({ settings, bgmList }: UseAudioRuntimeArgs) {
         nextAudio.muted = bgmMuted;
         await nextAudio.play().catch(() => undefined);
 
-        const targetVol = settings.bgmVol / 100;
+        const targetVol = getTargetBgmVolume();
         fadeInTimerRef.current = window.setInterval(() => {
           if (nextAudio.volume < targetVol - 0.05) {
             nextAudio.volume = Math.min(targetVol, nextAudio.volume + 0.05);
@@ -1655,7 +1708,7 @@ export function useAudioRuntime({ settings, bgmList }: UseAudioRuntimeArgs) {
         // ignore autoplay and blob issues
       }
     },
-    [bgmMuted, bgmPlaying, clearFadeTimers, settings.bgmVol],
+    [bgmMuted, bgmPlaying, clearFadeTimers, getTargetBgmVolume],
   );
 
   const stopBgm = useCallback(() => {
@@ -1691,7 +1744,7 @@ export function useAudioRuntime({ settings, bgmList }: UseAudioRuntimeArgs) {
         const url = URL.createObjectURL(blob);
         bgmUrlRef.current = url;
         bgmRef.current.src = url;
-        bgmRef.current.volume = settings.bgmVol / 100;
+        bgmRef.current.volume = getTargetBgmVolume();
         bgmRef.current.muted = bgmMuted;
         await bgmRef.current.play().catch(() => undefined);
         setBgmPlaying(true);
@@ -1702,7 +1755,7 @@ export function useAudioRuntime({ settings, bgmList }: UseAudioRuntimeArgs) {
         // ignore
       }
     },
-    [bgmList, bgmMuted, clearFadeTimers, settings.bgmVol, stopBgm],
+    [bgmList, bgmMuted, clearFadeTimers, getTargetBgmVolume, stopBgm],
   );
 
   const playSfx = useCallback(
@@ -1775,6 +1828,7 @@ export function useAudioRuntime({ settings, bgmList }: UseAudioRuntimeArgs) {
     crossfadeBgm,
     playSfx,
     pulseUi,
+    setVoiceDucking,
     setBgmPlaying,
     setBgmMuted,
     setCurrentBgmId,

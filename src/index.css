@@ -1,5 +1,5 @@
 :root {
-  --title-bg-url: url("/scene-bg/school-exterior.png");
+  --title-bg-url: none;
   --ui-bg: rgba(20, 16, 24, 0.68);
   --ui-stroke: rgba(255, 255, 255, 0.18);
   --ui-stroke-2: rgba(255, 255, 255, 0.12);
@@ -15,6 +15,8 @@
   --sprite-opacity: 1;
   --bg-scale: 1.04;
   --bg-opacity: 1;
+  --text-scale: 1;
+  --line-height: 1.8;
   --shadow: 0 18px 60px rgba(0, 0, 0, 0.42);
   --font: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", system-ui, sans-serif;
   --font-title: "STSong", "Songti SC", "Hiragino Mincho ProN", serif;
@@ -41,10 +43,43 @@ textarea {
   font-family: inherit;
 }
 
+button:focus-visible,
+a:focus-visible,
+select:focus-visible,
+input:focus-visible,
+textarea:focus-visible {
+  outline: 3px solid rgba(255, 225, 170, 0.94);
+  outline-offset: 3px;
+}
+
 #root,
 #app-root {
   height: 100%;
   width: 100%;
+}
+
+#app-root.readable-font {
+  --font: "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+}
+
+#app-root.high-contrast {
+  --text: #fff;
+  --muted: rgba(255, 255, 255, 0.86);
+  --ui-stroke: rgba(255, 255, 255, 0.42);
+}
+
+#app-root.high-contrast #box,
+#app-root.high-contrast .panel {
+  background-color: rgba(0, 0, 0, 0.88) !important;
+}
+
+#app-root.reduced-motion *,
+#app-root.reduced-motion *::before,
+#app-root.reduced-motion *::after {
+  animation-duration: 0.01ms !important;
+  animation-iteration-count: 1 !important;
+  transition-duration: 0.01ms !important;
+  scroll-behavior: auto !important;
 }
 
 #app-root {
@@ -492,6 +527,67 @@ textarea {
   text-align: center;
   font-size: 18px;
   opacity: 0.78;
+}
+
+.extras-grid,
+.extras-list {
+  display: grid;
+  gap: 12px;
+}
+
+.extras-section {
+  min-width: 0;
+}
+
+.extras-item,
+.extras-choice {
+  display: grid;
+  grid-template-columns: 52px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  padding: 13px 15px;
+  border: 1px solid var(--ui-stroke-2);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.045);
+  color: var(--text);
+  text-align: left;
+}
+
+.extras-item:not(:disabled) {
+  cursor: pointer;
+}
+
+.extras-item:disabled {
+  opacity: 0.45;
+}
+
+.cg-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: 12px;
+}
+
+.cg-gallery-item {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+  border: 1px solid var(--ui-stroke-2);
+  border-radius: 14px;
+  background: rgba(0, 0, 0, 0.24);
+  color: var(--text);
+  cursor: pointer;
+}
+
+.cg-gallery-item:disabled {
+  cursor: default;
+  opacity: 0.38;
+}
+
+.cg-gallery-art {
+  min-height: 96px;
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.04) center / cover no-repeat;
 }
 
 .title-footer {
@@ -1675,8 +1771,8 @@ textarea {
   margin: 8px auto 0;
   padding: 6px 10px 4px;
   color: rgba(255, 251, 246, 0.96);
-  font-size: 19px;
-  line-height: 1.82;
+  font-size: calc(19px * var(--text-scale));
+  line-height: var(--line-height);
   white-space: pre-wrap;
   text-shadow: 0 2px 10px rgba(0, 0, 0, 0.68), 0 0 30px rgba(0, 0, 0, 0.38);
   opacity: 0;
@@ -1686,19 +1782,19 @@ textarea {
 
 #text.tone-narration {
   color: rgba(247, 241, 232, 0.92);
-  line-height: 1.94;
+  line-height: calc(var(--line-height) + 0.14);
   letter-spacing: 0.03em;
 }
 
 #text.tone-system {
   color: rgba(227, 237, 240, 0.9);
-  font-size: 17px;
+  font-size: calc(17px * var(--text-scale));
   letter-spacing: 0.08em;
 }
 
 #text.emphasis-line {
-  font-size: 21px;
-  line-height: 1.96;
+  font-size: calc(21px * var(--text-scale));
+  line-height: calc(var(--line-height) + 0.16);
   padding-top: 12px;
   padding-bottom: 8px;
 }
@@ -2462,7 +2558,7 @@ textarea {
 
   #text {
     padding: 0 4px;
-    font-size: 15px;
+    font-size: calc(15px * var(--text-scale));
   }
 
   .sprite-multi {

@@ -1,7 +1,7 @@
-# Soul Returns VN
+# 盛开在谎言之上
 
 一个用 `React + Vite + TypeScript` 写的悬疑向视觉小说项目。  
-重点是把“剧情演出”和“本地资源管理”结合起来：可以边写剧情，边在浏览器里上传和替换背景、立绘、BGM、SFX、CG（含视频）。
+重点是把剧情演出、本地资产库和可持续扩展的路线系统结合起来。玩家可以直接游玩，作者也能在浏览器里管理背景、立绘、BGM、音效、角色语音和视频 CG。
 
 ## 在线体验
 
@@ -9,15 +9,19 @@
 
 ## 当前功能
 
-- 标题页、章节开场、结尾页的完整流程
-- 对话框打字机效果、自动播放、跳过、历史回看
-- 已读文本加速（避免二刷重复等待）
-- 本地存档与继续上次（带进度信息和缩略图）
-- 资源管理面板（上传、预览、重命名、删除、清空）
-- 资源类型支持：`bg` 背景、`sprite` 立绘、`bgm` 背景音乐、`sfx` 音效、`cg` 图片 CG / 视频 CG
+- 标题页、章节开场、全屏 CG、结尾页的完整流程
+- 对话框打字机、自动播放、仅跳过已读、历史与选择回看
+- 最近 200 步真实回滚，可跨选项重新选择
+- 8 个本地存档槽与继续上次，保存路线变量、章节、场景和缩略图
+- 鉴赏模式：章节选择、章节回放、路线回忆、图片与视频 CG 图鉴
+- 路线脚本支持：`@set`、`@inc`、`@jump`、`@if`
+- 资源管理面板支持背景、立绘、视频 CG、BGM、音效和角色语音
+- 上传语音优先播放，可选浏览器中文朗读，自动播放会等待语音结束
 - 场景背景覆盖：可以给某个场景单独绑定背景资源
-- 场景转场、雨幕/灰尘等氛围层、CG 弹出演出
-- 低性能模式自动降级，提升中低配设备流畅度
+- 字体缩放、行距、高对比度、易读字体、减少动态和转场等级
+- JSON 快速备份与带 SHA-256 校验的完整素材 ZIP 备份
+- 资源完整性检查、PWA 安装、按需缓存和完整离线素材包
+- 粒子默认关闭，普通背景直接切换，关键场景才转场
 
 ## 操作方式
 
@@ -41,7 +45,9 @@ npm run dev
 ## 构建与校验
 
 ```bash
-npm run check   # 剧情跳转/外链资源校验
+npm run test    # 核心状态、迁移、跳过、路线和回滚测试
+npm run validate:vn # 剧情标签、跳转和内置资源校验
+npm run check   # 类型、测试、资源校验与生产构建
 npm run build   # 生产构建
 npm run preview # 预览构建结果
 ```
@@ -50,20 +56,17 @@ npm run preview # 预览构建结果
 
 ```text
 src/
-  App.tsx                   # 主流程与状态管理
-  engine.ts                 # 场景/角色/演出解析
-  script.ts                 # 剧情脚本章节
-  components/
-    TitleScreen.tsx
-    CreditsScreen.tsx
-    SettingsPanel.tsx
-    AssetsPanel.tsx
-  lib/
-    manifest.ts             # 资源清单结构
-    background.ts           # 场景背景覆盖
-    storage.ts              # localStorage 读写
-    settings.ts             # 设置项默认值
-    sfx.ts                  # UI 音效
+  App.tsx                   # 页面编排与模块连接
+  engine.ts                 # 剧情脚本、场景和角色解析
+  script.ts                 # 正文剧情
+  vnRuntime.ts              # 播放、背景、音频和存档运行时
+  vnState.ts                # 稳定 ID、路线命令、永久进度和回滚内核
+  vnProgress.ts             # React 剧情状态适配层
+  vnVoice.ts                # 上传语音与浏览器朗读
+  vnBackup.ts               # JSON / ZIP 备份与校验恢复
+  vnExtras.tsx              # 懒加载鉴赏界面
+  vnOffline.ts              # 完整离线素材包
+  vnValidation.ts           # 浏览器内资源体检
   db.ts                     # IndexedDB 资源存取
 scripts/
   validate-vn.mjs           # 剧情与资源检查脚本
@@ -72,8 +75,10 @@ scripts/
 ## 数据存储说明
 
 - 资源文件（背景/BGM/CG 等）存储在浏览器 `IndexedDB`
-- 设定、存档、阅读进度存储在 `localStorage`
+- 设定、存档、已读、章节/CG 解锁、路线检查点存储在 `localStorage`
+- 数据格式为 v3，仍兼容旧 v1/v2 本地存档
 - 清理浏览器站点数据会导致本地资源与存档丢失
+- 建议定期在设置页导出完整 ZIP 备份
 
 ## GitHub Pages 部署
 
@@ -83,5 +88,4 @@ scripts/
 
 ## 说明
 
-这个仓库除了主工程外，还包含一些实验目录与历史文件。  
-主视觉小说工程以根目录的 `src/`、`scripts/`、`package.json` 为准。
+玩家功能和低频工具采用独立分包；鉴赏、备份、资源检查和离线管理只在打开时加载，不进入首屏常驻运行时。
